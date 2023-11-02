@@ -1,7 +1,3 @@
-##IF Maze generation/exploration
-The goal of this project is to create two executables: One which can be run to create both hand-designed and procedurally-generated maps and mazes, and one which can be run to explore in IF (Interactive Fiction)-style ("go north", "get key") the maps and mazes previously created.
-
-#Licensed under the FPA General Code License (https://about.fairfieldprogramming.org/programs/opensource-legal/fpa-general-code):
 Copyright 2023 Ryan Wells
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without limitation in the rights to use, copy, modify, merge, publish, and/ or distribute copies of the Software in an educational or personal context, subject to the following conditions:

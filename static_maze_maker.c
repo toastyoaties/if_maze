@@ -16,6 +16,7 @@
 
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
+#define NUM_CARDINAL_DIRECTIONS 4
 
 /* Type Definitions */
 enum cardinal_directions {
@@ -46,9 +47,12 @@ typedef struct map
 /* Declarations of External Variables */
 // none
 
+/* Declarations of Global Variables */
+int next_id = 0; // current unused id #
+
 /* Prototypes for non-main functions */
 Map *create_map(void);
-Room *initialize_rooms(int rooms_to_create);
+Room *make_room(int y_coordinate, int x_coordinate);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
 void save_map(Map *savable_map);
@@ -119,17 +123,6 @@ int main(void)
  *****************************************************************************************/
 Map *create_map(void)
 {
-    //TODO
-
-    // Prompt for desired width & height of starter grid
-
-    /*
-    A Map contains:
-        int height;
-        int width;
-        Room *root; // Pointer to start of linked list containing all rooms
-    */
-
     // Allocate memory for map:
     CLEAR_CONSOLE;
     (void) printf("Creating blank map...\n");
@@ -159,39 +152,51 @@ Map *create_map(void)
             break;
     }
 
-    created_map->root = initialize_rooms(created_map->height * created_map->width, height, width);
+    // Initialize linked list of rooms, starting from (0,0):
+    created_map->root = NULL;
+    for (int i = 0; i < created_map->height; i++)
+    {
+        for (int j = 0; j < created_map->width; j++)
+        {
+            Room *r = make_room(i, j);
+            if (created_map->root == NULL)
+            {
+                created_map->root = r;
+            }
+            else
+            {
+                Room *attach_point = created_map->root;
+                while (attach_point->next_room != NULL)
+                {
+                    attach_point = attach_point->next_room;
+                }
+                attach_point = r;
+            }
+        }
+    }
 
     return created_map;
 }
 
 /*****************************************************************************************
- * name_of_function:    Purpose:                                                         *
- *                      Parameters (and the meaning of each):                            *
- *                      Return value:                                                    *
- *                      Side effects (such as modifying external variables,              *
- *                          printing to stdout, or exiting the program):                 *
+ * make_room:    Purpose: Allocates memory for and initializes single room.              *
+ *               Parameters: int y_coordinate -> the y-coordinate to assign to the room  *
+ *                           int x_coordinate -> the x-coordinate to assign to the room  *
+ *               Return value: Room * -> a pointer to the new room                       *
+ *               Side effects: - Allocates memory.                                       *
+ *                             - Modifies global variable next_id.                       *
  *****************************************************************************************/
-Room *initialize_rooms(int rooms_to_create)
+Room *make_room(int y_coordinate, int x_coordinate)
 {
-    /*
-    typedef struct room
+    Room *r = malloc(sizeof(Room));
+    r->y_coordinate = y_coordinate, r->x_coordinate = x_coordinate;
+    r->exists = true, r->id = next_id++, r->next_room = NULL;
+    for (int i = 0; i < NUM_CARDINAL_DIRECTIONS; i++)
     {
-        int id;
-        char *id_alias;
-        int y_coordinate;
-        int x_coordinate;
-        bool exists;
-        bool exits[4];
-        struct room *next_room;
-    } Room;
-    */
-    // TODO: Recursively(?) initialize rooms
-    // # of rooms to initialize is represented by height * width
-    Room *root = malloc(sizeof(Room));
+        r->exits[i] = 0;
+    }
 
-    if 
-
-    return root;
+    return r;
 }
 
 /*****************************************************************************************

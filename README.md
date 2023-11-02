@@ -1,0 +1,2 @@
+##IF Maze generation/exploration
+The goal of this project is to create two executables: One which can be run to create both hand-designed and procedurally-generated maps and mazes, and one which can be run to explore in IF (Interactive Fiction)-style ("go north", "get key") the maps and mazes previously created.

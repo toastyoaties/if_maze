@@ -1,8 +1,8 @@
 /****************************************************************************************************
  * Name: static_maze_maker.c                                                                        *
- * File creation date: 2023-11-1		                                                            *
- * 1.0 date:		                                                                                *
- * Last modification date:	                                                                        *
+ * File creation date: 2023-11-1                                                                    *
+ * 1.0 date:                                                                                        *
+ * Last modification date:                                                                          *
  * Author: Ryan Wells                                                                               *
  * Purpose: Tool for creating hand-made mazes for use in IF maze exploration program                *
  *          (preventing the need for coding each maze individually).                                *
@@ -19,7 +19,8 @@
 #define NUM_CARDINAL_DIRECTIONS 4
 
 /* Type Definitions */
-enum cardinal_directions {
+enum cardinal_directions
+{
     NORTH,
     EAST,
     SOUTH,
@@ -44,6 +45,16 @@ typedef struct map
     Room *root; // Pointer to start of linked list containing all rooms
 } Map;
 
+typedef struct display
+{
+    int **layout;
+    int height;
+    int width;
+    int y_offset;
+    int x_offset;
+    int cursor_id;
+} Display;
+
 /* Declarations of External Variables */
 // none
 
@@ -55,6 +66,9 @@ Map *create_map(void);
 Room *make_room(int y_coordinate, int x_coordinate);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
+int **create_initial_layout(Map *map_to_display);
+Display *initialize_display(int **layout_array, int array_height, int array_width);
+void print_display(Display *display);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -64,7 +78,8 @@ void free_rooms(Room *r);
  * main:                Purpose: Runs main menu loop.                                    *
  *                      Parameters: none                                                 *
  *                      Return value: int                                                *
- *                      Side effects: - Prints to stdout                                 *
+ *                      Side effects: - Clears screen and scrollback                     *
+ *                                    - Prints to stdout                                 *
  *                                    - Reads from stdin                                 *
  *                                    - Terminates program                               *
  *****************************************************************************************/
@@ -89,11 +104,10 @@ int main(void)
         int selection = 0;
         for (;;)
         {
-            (void) printf("Enter option number: ");
+            (void) printf("Enter option number:\n>");
             (void) scanf("%d", &selection); while (getchar() != '\n');
 
             if (selection < 1 || selection > 3)
-
                 (void) printf("Please pick from the available options.\n");
             else
                 break;
@@ -117,7 +131,8 @@ int main(void)
  * create_map:    Purpose: Creates blank map for further editing.                        *
  *                Parameters: none                                                       *
  *                Return value: Map * -> The created map, to be passed into editing.     *
- *                Side effects: - Prints to stdout.                                      *
+ *                Side effects: - Clears screen and scrollback                           *
+ *                              - Prints to stdout.                                      *
  *                              - Reads from stdin.                                      *
  *                              - Allocates memory.                                      *
  *****************************************************************************************/
@@ -221,16 +236,25 @@ Map *load_map(void)
  *              Return value: Map * -> the now-edited map,                                  *
  *                                     to be freed before further program operation         *
  *                                     or program termination.                              *
- *              Side effects: - Calls save_map, which edits external files.                 *
+ *              Side effects: - Clears screen and scrollback                                *
+ *                            - Calls save_map, which edits external files.                 *
  *                            - Prints to stdout.                                           *
  *                            - Reads from stdin.                                           *
  *                            - Modifies any and all data associated with passed map.       *
  ********************************************************************************************/
 Map *edit_map(Map *editable_map)
 {
+    CLEAR_CONSOLE;
+
     //TODO
 
     // Print grid with x & y axes numbered & lettered (like Battleship board)
+    int (*layout)[editable_map->width] = create_initial_layout(editable_map);
+
+    Display *display = initialize_display(layout, editable_map->height, editable_map->width);
+
+    print_display(&display);
+
     // Prompt for cursor start location (represented by *)
     //  Alternately, start cursor on top line, furthest room to left.
     // Allow commands for moving cursor cardinally ("move up")
@@ -254,7 +278,102 @@ Map *edit_map(Map *editable_map)
 
     //TODO: Allow saving map before returning (returning leads to freeing--aka losing--map from memory)
     //TODO: Warns when about to return without saving
+    free(layout);
+    free(display);
     return editable_map;
+}
+
+/**********************************************************************************************************
+ * create_initial_layout:     Purpose: Allocates room for, and initializes,                               *
+ *                                     a 2D array containing the ids of rooms to display                  *
+ *                                     as visualized map during editing.                                  *
+ *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
+ *                            Return value: int ** -> a pointer to the array                              *
+ *                            Side effects: - allocates memory                                            *
+ **********************************************************************************************************/
+int **create_initial_layout(Map *map_to_display)
+{
+    //Create 2D grid to store room ids:
+    int (*layout)[map_to_display->width]; //<-represents a single row in the form of a pointer to an array of <width> ints
+    layout = malloc(sizeof(*layout) * map_to_display->height); // Allocating memory for <height> number of rows
+
+    for (int y = 0; y < map_to_display->height; y++)
+    {
+        for (int x = 0; x < map_to_display->width; x++)
+        {
+            Room *current = map_to_display->root;
+            while (current != NULL)
+            {
+                if (current->y_coordinate == y && current->x_coordinate == x)
+                {
+                    layout[y][x] = current->id;
+                    break;
+                }
+                current = current->next_room;
+            }
+        }
+    }
+
+    return layout;
+}
+
+/**********************************************************************************************************
+ * initialize_display:        Purpose: Allocates room for, and initializes, a Display.                    *
+ *                            Parameters: int **layout_array -> pointer to the 2D layout array to display *
+ *                                        int array_height -> the height of the 2D layout array           *
+ *                                        int array_width -> the width of the 2D layout array             *
+ *                            Return value: Display * -> a pointer to the initialized Display             *
+ *                            Side effects: - allocates memory                                            *
+ **********************************************************************************************************/
+Display *initialize_display(int **layout_array, int array_height, int array_width)
+{
+    Display *d = malloc(sizeof(Display));
+
+    d->layout = layout_array, d->height = array_height, d->width = array_width;
+    d->y_offset = 0, d->x_offset = 0, d->cursor_id = layout_array[0][0]; // TODO: change to be first extant room, not (0,0)
+
+    return d;
+}
+
+/*****************************************************************************************
+ * print_display:       Purpose: Accepts a given Display and prints it to the screen.    *
+ *                      Parameters: Display *display -> the Display to be printed.       *
+ *                      Return value: none                                               *
+ *                      Side effects: - prints to stdout                                 *
+ *****************************************************************************************/
+void print_display(Display *display)
+{
+    // typedef struct display
+    // {
+    //     int **layout;
+    //     int height;
+    //     int width;
+    //     int y_offset;
+    //     int x_offset;
+    //     int cursor_id;
+    // } Display;
+
+    for (int y = 0; y < display->height; y++)
+    {
+        for (int x = 0; x < display->width; x++)
+        {
+            (void) printf("%s", ystr(y)); // y-coordinates are displayed as letters for user QoL
+        }
+    }
+
+    return;
+}
+
+char *ystr(int y_coordinate)
+{
+    int letters_wide = 1;
+    int temp = y_coordinate;
+    while (temp > 25) // coordinates start at 0, so 0-25 is alphabet
+        temp -= 26, letters_wide++;
+    char str[letters_wide + 1];
+    for (int i = 0; i < letters_wide + 1; i++)
+        str[i] = '\0';
+    while (
 }
 
 /*******************************************************************************************

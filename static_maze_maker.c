@@ -13,10 +13,14 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
 #define NUM_CARDINAL_DIRECTIONS 4
+#define MAX_DISPLAY_HEIGHT 40
+#define MAX_DISPLAY_WIDTH 40
+#define NUM_LETTERS 26
 
 /* Type Definitions */
 enum cardinal_directions
@@ -67,8 +71,12 @@ Room *make_room(int y_coordinate, int x_coordinate);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
 int **create_initial_layout(Map *map_to_display);
-Display *initialize_display(int **layout_array, int array_height, int array_width);
+Display *initialize_display(int **layout_array, int array_height, int array_width, Room *root);
 void print_display(Display *display);
+char *ystr(int y_coordinate);
+int calculate_letter_digits(int number_to_convert);
+int lower_boundary(int base, int power);
+int calculate_letter_index(int current_number, int current_digit, int lower_boundary);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -251,7 +259,7 @@ Map *edit_map(Map *editable_map)
     // Print grid with x & y axes numbered & lettered (like Battleship board)
     int (*layout)[editable_map->width] = create_initial_layout(editable_map);
 
-    Display *display = initialize_display(layout, editable_map->height, editable_map->width);
+    Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
 
     print_display(&display);
 
@@ -325,12 +333,36 @@ int **create_initial_layout(Map *map_to_display)
  *                            Return value: Display * -> a pointer to the initialized Display             *
  *                            Side effects: - allocates memory                                            *
  **********************************************************************************************************/
-Display *initialize_display(int **layout_array, int array_height, int array_width)
+Display *initialize_display(int **layout_array, int array_height, int array_width, Room *root)
 {
     Display *d = malloc(sizeof(Display));
 
-    d->layout = layout_array, d->height = array_height, d->width = array_width;
-    d->y_offset = 0, d->x_offset = 0, d->cursor_id = layout_array[0][0]; // TODO: change to be first extant room, not (0,0)
+    d->layout = layout_array;
+    d->height = array_height > MAX_DISPLAY_HEIGHT ? MAX_DISPLAY_HEIGHT : array_height;
+    d->width = array_width > MAX_DISPLAY_WIDTH ? MAX_DISPLAY_WIDTH : array_width;
+    d->y_offset = 0, d->x_offset = 0;
+
+    // Set d->cursor_id to the first extant room in the layout array (will always be at (0,0) in a fresh map):
+    for (int y = 0; y < d->height; y++)
+    {
+        for (int x = 0; x < d->width; x++)
+        {
+            for (Room *current_room = root; current_room->next_room != NULL; current_room = current_room->next_room)
+            {
+                if (current_room->id == d->layout[y][x])
+                {
+                    if (current_room->exists)
+                    {
+                        d->cursor_id = current_room->id;
+                        goto full_breakout;
+                    }
+                    else
+                        break;
+                }
+            }
+        }
+    }
+    full_breakout:
 
     return d;
 }
@@ -357,7 +389,8 @@ void print_display(Display *display)
     {
         for (int x = 0; x < display->width; x++)
         {
-            (void) printf("%s", ystr(y)); // y-coordinates are displayed as letters for user QoL
+            char *str = ystr(y);
+            (void) printf("%s", str), free(str); // y-coordinates are displayed as letters for user QoL
         }
     }
 
@@ -366,14 +399,47 @@ void print_display(Display *display)
 
 char *ystr(int y_coordinate)
 {
-    int letters_wide = 1;
-    int temp = y_coordinate;
-    while (temp > 25) // coordinates start at 0, so 0-25 is alphabet
-        temp -= 26, letters_wide++;
-    char str[letters_wide + 1];
+    int letters_wide = calculate_letter_digits(y_coordinate);
+    char *str = malloc(sizeof(char) * (letters_wide + 1));
     for (int i = 0; i < letters_wide + 1; i++)
         str[i] = '\0';
-    while (
+    int digit = letters_wide;
+    int str_index = 0;
+    while (digit > 0)
+    {
+        int letter_index = calculate_letter_index(y_coordinate, digit, lower_boundary(NUM_LETTERS, digit - 1));
+        str[str_index++] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[letter_index]; // non--ASCII-reliant version of <calculate_letter_index() + 'A'>
+        y_coordinate -= (letter_index + 1) * pow(NUM_LETTERS, --digit);
+    }
+
+    return str;
+}
+
+int calculate_letter_digits(int number_to_convert)
+{
+    int digits = 1;
+    while (number_to_convert >= lower_boundary(NUM_LETTERS, digits))
+        digits++;
+    return digits;
+}
+
+int lower_boundary(int base, int power)
+{
+    int sum = 0;
+    while (power > 0)
+        sum += pow(base, power--);
+    return sum;
+}
+
+int calculate_letter_index(int current_number, int current_digit, int lower_boundary)
+{
+    int counter = 0;
+    while (current_number >= lower_boundary)
+    {
+        current_number -= pow(NUM_LETTERS, current_digit - 1);
+        counter++;
+    }
+    return counter - 1;
 }
 
 /*******************************************************************************************
@@ -424,3 +490,8 @@ void free_rooms(Room *r)
 
     return;
 }
+
+//FUTURE TODOS:
+// - Make height/width of editor adjustable for different sized monitors. Maybe implement a settings menu with defaults?
+// - Add ability to turn off and back on the axis labels.
+// - Add ability to declare the edge of the map and make rooms connect to the beginning of a different map on the same level, to make it more feasable to build large spaces by dividing them into separate chunks each on their own map.

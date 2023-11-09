@@ -20,7 +20,9 @@
 #define NUM_CARDINAL_DIRECTIONS 4
 #define MAX_DISPLAY_HEIGHT 40
 #define MAX_DISPLAY_WIDTH 40
+#define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int limit.
 #define NUM_LETTERS 26
+#define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 /* Type Definitions */
 enum cardinal_directions
@@ -159,6 +161,8 @@ Map *create_map(void)
         (void) scanf("%d", &(created_map->height)); while (getchar() != '\n');
         if (created_map->height < 1)
             (void) printf("Please enter an integer greater than zero.\n");
+        else if (created_map->height > MAX_COORDINATE)
+            (void) printf("Max height is %d.\n", MAX_COORDINATE);
         else
             break;
     }
@@ -171,6 +175,8 @@ Map *create_map(void)
         (void) scanf("%d", &(created_map->width)); while (getchar() != '\n');
         if (created_map->width < 1)
             (void) printf("Please enter an integer greater than zero.\n");
+        else if (created_map->width > MAX_COORDINATE)
+            (void) printf("Max width is %d.\n", MAX_COORDINATE);
         else
             break;
     }
@@ -234,6 +240,7 @@ Room *make_room(int y_coordinate, int x_coordinate)
 Map *load_map(void)
 {
     //TODO
+    //  ...as part of the function, perform validation on the map file (for example, that it hasn't been edited so as to expand past MAX_COORDINATE, etc)
     Map *loaded_map = NULL;
     return loaded_map;
 }
@@ -271,9 +278,13 @@ Map *edit_map(Map *editable_map)
     // Allow commands for establishing connecting doors between rooms (cardinally)
     // Allow commands for removing connections
     // Allow commands for expanding grid by x rows or columns
+    //      ...but ensure that this never expands past the MAX_COORDINATE limit.
     // Allow commands for expanding grid by adding new individual rooms
+    //      ...but ensure that this never expands past the MAX_COORDINATE limit.
     // Allow commands for deleting individual rooms
+    //      ...but ensure the row/column count stays above zero
     // Allow commands for retracting grid by subtracting x rows or columns
+    //      ...but ensure the row/column count stays above zero
     // Allow commands for establishing entrances and exits to maze (including interior ones)
     // Allow commands for adding id aliases (ids are established programmatically)
     // Allow commands for scrolling view of grid cardinally (in this case, meaning up, down, left, right)
@@ -397,6 +408,12 @@ void print_display(Display *display)
     return;
 }
 
+/********************************************************************************************
+ * ystr:    Purpose: Converts a given number coordinate into a letter coordinate.           *
+ *          Parameters: int y_coordinate -> the number coordinate to be converted           *
+ *          Return value: char * -> a pointer to a string containing the letter coordinate  *
+ *          Side effects: - allocates memory                                                *
+ ********************************************************************************************/
 char *ystr(int y_coordinate)
 {
     int letters_wide = calculate_letter_digits(y_coordinate);
@@ -408,7 +425,7 @@ char *ystr(int y_coordinate)
     while (digit > 0)
     {
         int letter_index = calculate_letter_index(y_coordinate, digit, lower_boundary(NUM_LETTERS, digit - 1));
-        str[str_index++] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[letter_index]; // non--ASCII-reliant version of <calculate_letter_index() + 'A'>
+        str[str_index++] = ALPHABET[letter_index];
         y_coordinate -= (letter_index + 1) * pow(NUM_LETTERS, --digit);
     }
 

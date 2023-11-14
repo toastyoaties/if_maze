@@ -20,8 +20,9 @@
 #define NUM_CARDINAL_DIRECTIONS 4
 #define MAX_DISPLAY_HEIGHT 40
 #define MAX_DISPLAY_WIDTH 40
-#define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int limit.
+#define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
 #define NUM_LETTERS 26
+#define MAX_ID (321272405 * 321272405)
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 /* Type Definitions */
@@ -35,10 +36,10 @@ enum cardinal_directions
 
 typedef struct room
 {
-    int id;
+    long long id;
     char *id_alias;
-    int y_coordinate;
-    int x_coordinate;
+    int32_t y_coordinate;
+    int32_t x_coordinate;
     bool exists;
     bool exits[4];
     struct room *next_room;
@@ -46,39 +47,39 @@ typedef struct room
 
 typedef struct map
 {
-    int height;
-    int width;
+    int32_t height;
+    int32_t width;
     Room *root; // Pointer to start of linked list containing all rooms
 } Map;
 
 typedef struct display
 {
-    int **layout;
+    long long **layout;
     int height;
     int width;
-    int y_offset;
-    int x_offset;
-    int cursor_id;
+    int32_t y_offset;
+    int32_t x_offset;
+    long long cursor_id;
 } Display;
 
 /* Declarations of External Variables */
 // none
 
 /* Declarations of Global Variables */
-int next_id = 0; // current unused id #
+// none
 
 /* Prototypes for non-main functions */
 Map *create_map(void);
-Room *make_room(int y_coordinate, int x_coordinate);
+Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
-int **create_initial_layout(Map *map_to_display);
-Display *initialize_display(int **layout_array, int array_height, int array_width, Room *root);
+long long **create_initial_layout(Map *map_to_display);
+Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root);
 void print_display(Display *display);
-char *ystr(int y_coordinate);
-int calculate_letter_digits(int number_to_convert);
-int lower_boundary(int base, int power);
-int calculate_letter_index(int current_number, int current_digit, int lower_boundary);
+char *ystr(int32_t y_coordinate);
+int calculate_letter_digits(int32_t number_to_convert);
+int32_t lower_boundary(int base, int power);
+int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -183,11 +184,12 @@ Map *create_map(void)
 
     // Initialize linked list of rooms, starting from (0,0):
     created_map->root = NULL;
-    for (int i = 0; i < created_map->height; i++)
+    long long next_id = 0;
+    for (int32_t i = 0; i < created_map->height; i++)
     {
-        for (int j = 0; j < created_map->width; j++)
+        for (int32_t j = 0; j < created_map->width; j++)
         {
-            Room *r = make_room(i, j);
+            Room *r = make_room(i, j, next_id++);
             if (created_map->root == NULL)
             {
                 created_map->root = r;
@@ -209,17 +211,16 @@ Map *create_map(void)
 
 /*****************************************************************************************
  * make_room:    Purpose: Allocates memory for and initializes single room.              *
- *               Parameters: int y_coordinate -> the y-coordinate to assign to the room  *
- *                           int x_coordinate -> the x-coordinate to assign to the room  *
+ *               Parameters: int32_t y_coordinate -> the y-coordinate to assign to the room  *
+ *                           int32_t x_coordinate -> the x-coordinate to assign to the room  *
  *               Return value: Room * -> a pointer to the new room                       *
  *               Side effects: - Allocates memory.                                       *
- *                             - Modifies global variable next_id.                       *
  *****************************************************************************************/
-Room *make_room(int y_coordinate, int x_coordinate)
+Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
 {
     Room *r = malloc(sizeof(Room));
     r->y_coordinate = y_coordinate, r->x_coordinate = x_coordinate;
-    r->exists = true, r->id = next_id++, r->next_room = NULL;
+    r->exists = true, r->id = room_id, r->next_room = NULL;
     for (int i = 0; i < NUM_CARDINAL_DIRECTIONS; i++)
     {
         r->exits[i] = 0;
@@ -264,7 +265,7 @@ Map *edit_map(Map *editable_map)
     //TODO
 
     // Print grid with x & y axes numbered & lettered (like Battleship board)
-    int (*layout)[editable_map->width] = create_initial_layout(editable_map);
+    long long (*layout)[editable_map->width] = create_initial_layout(editable_map);
 
     Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
 
@@ -279,9 +280,11 @@ Map *edit_map(Map *editable_map)
     // Allow commands for removing connections
     // Allow commands for expanding grid by x rows or columns
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
+    //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
     // Allow commands for expanding grid by adding new individual rooms
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
-    // Allow commands for deleting individual rooms
+    //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
+// Allow commands for deleting individual rooms
     //      ...but ensure the row/column count stays above zero
     // Allow commands for retracting grid by subtracting x rows or columns
     //      ...but ensure the row/column count stays above zero
@@ -307,18 +310,18 @@ Map *edit_map(Map *editable_map)
  *                                     a 2D array containing the ids of rooms to display                  *
  *                                     as visualized map during editing.                                  *
  *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
- *                            Return value: int ** -> a pointer to the array                              *
+ *                            Return value: long long ** -> a pointer to the array                              *
  *                            Side effects: - allocates memory                                            *
  **********************************************************************************************************/
-int **create_initial_layout(Map *map_to_display)
+long long **create_initial_layout(Map *map_to_display)
 {
     //Create 2D grid to store room ids:
-    int (*layout)[map_to_display->width]; //<-represents a single row in the form of a pointer to an array of <width> ints
+    long long (*layout)[map_to_display->width]; //<-represents a single row in the form of a pointer to an array of <width> ints
     layout = malloc(sizeof(*layout) * map_to_display->height); // Allocating memory for <height> number of rows
 
-    for (int y = 0; y < map_to_display->height; y++)
+    for (int32_t y = 0; y < map_to_display->height; y++)
     {
-        for (int x = 0; x < map_to_display->width; x++)
+        for (int32_t x = 0; x < map_to_display->width; x++)
         {
             Room *current = map_to_display->root;
             while (current != NULL)
@@ -338,13 +341,13 @@ int **create_initial_layout(Map *map_to_display)
 
 /**********************************************************************************************************
  * initialize_display:        Purpose: Allocates room for, and initializes, a Display.                    *
- *                            Parameters: int **layout_array -> pointer to the 2D layout array to display *
- *                                        int array_height -> the height of the 2D layout array           *
- *                                        int array_width -> the width of the 2D layout array             *
+ *                            Parameters: long long **layout_array -> pointer to the 2D layout array to display *
+ *                                        int32_t array_height -> the height of the 2D layout array           *
+ *                                        int32_t array_width -> the width of the 2D layout array             *
  *                            Return value: Display * -> a pointer to the initialized Display             *
  *                            Side effects: - allocates memory                                            *
  **********************************************************************************************************/
-Display *initialize_display(int **layout_array, int array_height, int array_width, Room *root)
+Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root)
 {
     Display *d = malloc(sizeof(Display));
 
@@ -388,19 +391,19 @@ void print_display(Display *display)
 {
     // typedef struct display
     // {
-    //     int **layout;
+    //     long long **layout;
     //     int height;
     //     int width;
-    //     int y_offset;
-    //     int x_offset;
-    //     int cursor_id;
+    //     int32_t y_offset;
+    //     int32_t x_offset;
+    //     long long cursor_id;
     // } Display;
 
     for (int y = 0; y < display->height; y++)
     {
         for (int x = 0; x < display->width; x++)
         {
-            char *str = ystr(y);
+            char *str = ystr(y + display->y_offset);
             (void) printf("%s", str), free(str); // y-coordinates are displayed as letters for user QoL
         }
     }
@@ -410,11 +413,11 @@ void print_display(Display *display)
 
 /********************************************************************************************
  * ystr:    Purpose: Converts a given number coordinate into a letter coordinate.           *
- *          Parameters: int y_coordinate -> the number coordinate to be converted           *
+ *          Parameters: int32_t y_coordinate -> the number coordinate to be converted           *
  *          Return value: char * -> a pointer to a string containing the letter coordinate  *
  *          Side effects: - allocates memory                                                *
  ********************************************************************************************/
-char *ystr(int y_coordinate)
+char *ystr(int32_t y_coordinate)
 {
     int letters_wide = calculate_letter_digits(y_coordinate);
     char *str = malloc(sizeof(char) * (letters_wide + 1));
@@ -432,7 +435,8 @@ char *ystr(int y_coordinate)
     return str;
 }
 
-int calculate_letter_digits(int number_to_convert)
+// calculates the number of letter-digits (eg, A is 1 digit, ZGM is 3 digits) the conversion of the given numerical input will result in.
+int calculate_letter_digits(int32_t number_to_convert)
 {
     int digits = 1;
     while (number_to_convert >= lower_boundary(NUM_LETTERS, digits))
@@ -440,15 +444,17 @@ int calculate_letter_digits(int number_to_convert)
     return digits;
 }
 
-int lower_boundary(int base, int power)
+// calculates the lower boundary of the coordinate range created by the current exponentiation iteration
+int32_t lower_boundary(int base, int power)
 {
-    int sum = 0;
+    int32_t sum = 0;
     while (power > 0)
         sum += pow(base, power--);
     return sum;
 }
 
-int calculate_letter_index(int current_number, int current_digit, int lower_boundary)
+// calculates the index (within the alphabet, A-Z : 0-25) of the current digit in the letter coordinate
+int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary)
 {
     int counter = 0;
     while (current_number >= lower_boundary)

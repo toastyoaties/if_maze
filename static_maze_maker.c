@@ -14,15 +14,16 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
 #define NUM_CARDINAL_DIRECTIONS 4
 #define MAX_DISPLAY_HEIGHT 40
-#define MAX_DISPLAY_WIDTH 40
+#define MAX_DISPLAY_WIDTH 25
 #define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
 #define NUM_LETTERS 26
-#define MAX_ID (321272405 * 321272405)
+#define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 /* Type Definitions */
@@ -66,7 +67,7 @@ typedef struct display
 // none
 
 /* Declarations of Global Variables */
-// none
+int error_code = 0;
 
 /* Prototypes for non-main functions */
 Map *create_map(void);
@@ -75,11 +76,12 @@ Map *load_map(void);
 Map *edit_map(Map *editable_map);
 long long **create_initial_layout(Map *map_to_display);
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root);
-void print_display(Display *display);
+void print_display(Display *display, Room *root);
 char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
 int32_t lower_boundary(int base, int power);
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
+Room *find_room(Room *root, long long room_id);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -131,10 +133,17 @@ int main(void)
             case 2: free_map(edit_map(load_map())); break;
             default: goto quit;
         }
+        if (error_code)
+            break;
     }
     // Exit program:
     quit:
-    return 0;
+    switch (error_code)
+    {
+        default: break;
+        case 1: (void) printf("Encountered unexpected error. Error code 1: Unable to find room with matching coordinates.\n"); break;
+    }
+    return error_code;
 }
 
 /* Definitions of other functions */
@@ -209,13 +218,13 @@ Map *create_map(void)
     return created_map;
 }
 
-/*****************************************************************************************
- * make_room:    Purpose: Allocates memory for and initializes single room.              *
+/*********************************************************************************************
+ * make_room:    Purpose: Allocates memory for and initializes single room.                  *
  *               Parameters: int32_t y_coordinate -> the y-coordinate to assign to the room  *
  *                           int32_t x_coordinate -> the x-coordinate to assign to the room  *
- *               Return value: Room * -> a pointer to the new room                       *
- *               Side effects: - Allocates memory.                                       *
- *****************************************************************************************/
+ *               Return value: Room * -> a pointer to the new room                           *
+ *               Side effects: - Allocates memory.                                           *
+ *********************************************************************************************/
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
 {
     Room *r = malloc(sizeof(Room));
@@ -269,7 +278,13 @@ Map *edit_map(Map *editable_map)
 
     Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
 
-    print_display(&display);
+    print_display(&display, editable_map->root);
+    if (error_code)
+    {
+        free(layout);
+        free(display);
+        return editable_map;
+    }
 
     // Prompt for cursor start location (represented by *)
     //  Alternately, start cursor on top line, furthest room to left.
@@ -277,14 +292,17 @@ Map *edit_map(Map *editable_map)
     // Allow commands for moving cursor cardinally while skipping over non-existent rooms ("skip up")
     // Allow commands for cursor jumping ("jump to A3")
     // Allow commands for establishing connecting doors between rooms (cardinally)
+    //      ...for now, force exit matching (eg, adding a north exit to a lower room forces a south exit to be added to the room above).
+    //        ...one day, this could be refactored to allow "warping" exits, but it'd probably be better to add that functionality w/ a proper GUI.
     // Allow commands for removing connections
+    //      ...force destruction of matching exit (eg, removing a north exit forces removal of south exit from room above)
     // Allow commands for expanding grid by x rows or columns
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
     //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
     // Allow commands for expanding grid by adding new individual rooms
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
     //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
-// Allow commands for deleting individual rooms
+    // Allow commands for deleting individual rooms
     //      ...but ensure the row/column count stays above zero
     // Allow commands for retracting grid by subtracting x rows or columns
     //      ...but ensure the row/column count stays above zero
@@ -310,7 +328,7 @@ Map *edit_map(Map *editable_map)
  *                                     a 2D array containing the ids of rooms to display                  *
  *                                     as visualized map during editing.                                  *
  *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
- *                            Return value: long long ** -> a pointer to the array                              *
+ *                            Return value: long long ** -> a pointer to the array                        *
  *                            Side effects: - allocates memory                                            *
  **********************************************************************************************************/
 long long **create_initial_layout(Map *map_to_display)
@@ -339,14 +357,14 @@ long long **create_initial_layout(Map *map_to_display)
     return layout;
 }
 
-/**********************************************************************************************************
- * initialize_display:        Purpose: Allocates room for, and initializes, a Display.                    *
+/****************************************************************************************************************
+ * initialize_display:        Purpose: Allocates room for, and initializes, a Display.                          *
  *                            Parameters: long long **layout_array -> pointer to the 2D layout array to display *
- *                                        int32_t array_height -> the height of the 2D layout array           *
- *                                        int32_t array_width -> the width of the 2D layout array             *
- *                            Return value: Display * -> a pointer to the initialized Display             *
- *                            Side effects: - allocates memory                                            *
- **********************************************************************************************************/
+ *                                        int32_t array_height -> the height of the 2D layout array             *
+ *                                        int32_t array_width -> the width of the 2D layout array               *
+ *                            Return value: Display * -> a pointer to the initialized Display                   *
+ *                            Side effects: - allocates memory                                                  *
+ ****************************************************************************************************************/
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root)
 {
     Display *d = malloc(sizeof(Display));
@@ -387,7 +405,7 @@ Display *initialize_display(long long **layout_array, int32_t array_height, int3
  *                      Return value: none                                               *
  *                      Side effects: - prints to stdout                                 *
  *****************************************************************************************/
-void print_display(Display *display)
+void print_display(Display *display, Room *root)
 {
     // typedef struct display
     // {
@@ -399,12 +417,178 @@ void print_display(Display *display)
     //     long long cursor_id;
     // } Display;
 
+    // Find max screen length of y-coordinates to display, for formatting purposes:
+    char *longest_y_string = ystr(display->height - 1 + display->y_offset);
+    int longest_letter_digits = strlen(longest_y_string);
+    free(longest_y_string);
+
+    // Find max screen length of x-coordinates to display, for formatting purposes:
+    int longest_number_digits = snprintf(NULL, 0, "%d", display->width - 1 + display->x_offset);
+
+    //Find printing width of one room + surrounding symbols:
+    int min_cell_width = 5;
+    int space_on_both_sides = 2;
+    int cell_width = min_cell_width > longest_number_digits + space_on_both_sides ? min_cell_width : longest_number_digits + space_on_both_sides;
+    int assumed_terminal_width_in_cols = MAX_DISPLAY_WIDTH * min_cell_width;
+    if (assumed_terminal_width_in_cols < display->width * cell_width)
+        display->width = assumed_terminal_width_in_cols / cell_width;
+    int room_width = 3;
+    int hyphens = cell_width - room_width;
+    int left_hyphens = hyphens / 2;
+    int right_hyphens = hyphens - left_hyphens;
+
+    /* Example: *******************
+     *      |    |                *
+     *AAA -( )--( )--( )-         *
+     *      |         |           *
+     *AAB  ( )  ( )--( )          *
+     *      |                     *
+     *      20   21   22          *
+     ******************************/
+
+    // Start printing display:
     for (int y = 0; y < display->height; y++)
     {
+        // Row above room:
+        // Print spaces where letter coordinates would go:
+        for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
+            (void) printf(" ");
+        (void) printf(" ");
+        // Print visible rooms:
         for (int x = 0; x < display->width; x++)
         {
-            char *str = ystr(y + display->y_offset);
-            (void) printf("%s", str), free(str); // y-coordinates are displayed as letters for user QoL
+            // Print spaces where left hyphens & left side of room would be on room line:
+            for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
+                (void) printf(" ");
+            // Find pointer to room matching current coordinates:
+            Room *current = find_room(root, display->layout[y][x]);
+            if (current == NULL)
+            {
+                error_code = 1;
+                return;
+            }
+            // Print either passageway or spaces depending on north exit per room
+            //      (this code assumes a north exit always corresponds with a south exit above):
+            if (current->exists && current->exits[NORTH])
+                (void) printf("|");
+            else
+                (void) printf(" ");
+            // Print spaces where right side of room & right hyphens would be on room line:
+            for (int hyphen = 0; hyphen < right_hyphens + 1; hyphen++) // + 1 is for the right parenthesis of the room.
+                (void) printf(" ");
+        }
+        (void) printf("\n");
+
+        // Row with room:
+        // Print letter coordinates:
+        char *str = ystr(y + display->y_offset);
+        int letter_digits = strlen(str);
+        if (longest_letter_digits > letter_digits)
+            for (int letter_digit = 0; letter_digit < longest_letter_digits - letter_digits; letter_digit++)
+                (void) printf(" ");
+        (void) printf("%s ", str), free(str); // y-coordinates are displayed as letters for user QoL
+        // Print visible rooms:
+        for (int x = 0; x < display->width; x++)
+        {
+            // Find pointer to room matching current coordinates:
+            Room *current = find_room(root, display->layout[y][x]);
+            if (current == NULL)
+            {
+                error_code = 1;
+                return;
+            }
+            // Print either left hyphens or spaces depending on east exit per room
+            //      (this code assumes an east exit always corresponds with a west exit to the left):
+            for (int hyphen = 0; hyphen < left_hyphens; hyphen++)
+                if (current->exists && current->exits[EAST])
+                    (void) printf("-");
+                else
+                    (void) printf(" ");
+
+            // Print room (if existent), with cursor if that's where the cursor is:
+            if (current->exists)
+                (void) printf("(");
+            else
+                (void) printf(" ");
+            if (current->id == display->cursor_id)
+                (void) printf("*");
+            else
+                (void) printf(" ");
+            if (current->exists)
+                (void) printf(")");
+            else
+                (void) printf(" ");
+
+            // Print eighter right hyphens or spaces depending on west exit per room
+            //      (this code assumes a west exit always corresponds with an east exit to the right):
+            for (int hyphen = 0; hyphen < right_hyphens; hyphen++)
+                if (current->exists && current->exits[WEST])
+                    (void) printf("-");
+                else
+                    (void) printf(" ");
+        }
+        (void) printf("\n");
+
+        // If this is last row of rooms, print row beneath room:
+        if (y == display->height - 1)
+        {
+            // Print spaces where letter coordinates would go:
+            for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
+                (void) printf(" ");
+            (void) printf(" ");
+            // Print visible rooms:
+            for (int x = 0; x < display->width; x++)
+            {
+                // Print spaces where left hyphens & left side of room would be on room line:
+                for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
+                    (void) printf(" ");
+                // Find pointer to room matching current coordinates:
+                Room *current = find_room(root, display->layout[y][x]);
+                if (current == NULL)
+                {
+                    error_code = 1;
+                    return;
+                }
+                // Print either passageway or spaces depending on north exit per room
+                //      (this code assumes a south exit always corresponds with a north exit below):
+                if (current->exists && current->exits[SOUTH])
+                    (void) printf("|");
+                else
+                    (void) printf(" ");
+                // Print spaces where right side of room & right hyphens would be on room line:
+                for (int hyphen = 0; hyphen < right_hyphens + 1; hyphen++) // + 1 is for the right parenthesis of the room.
+                    (void) printf(" ");
+            }
+            (void) printf("\n");
+
+            // Finally, print x-coordinates row:
+            // Print spaces where letter coordinates would go:
+            for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
+                (void) printf(" ");
+            (void) printf(" ");
+            // Print x-coordinates:
+            for (int x = 0; x < display->width; x++)
+            {
+                // Create x-coordinate string:
+                int needed_strlen = snprintf(NULL, 0, "%d", x + display->x_offset);
+                char *x_str = malloc(sizeof(char) * (needed_strlen + 1));
+                (void) snprintf(x_str, sizeof(x_str), "%d", x + display->x_offset);
+                // Print centered x-coordinate string:
+                if (cell_width == needed_strlen + space_on_both_sides)
+                    (void) printf(" %s ", x_str), free(x_str);
+                else
+                {
+                    int spaces_needed = cell_width - needed_strlen;
+                    int left_spaces = spaces_needed / 2;
+                    int right_spaces = spaces_needed - left_spaces;
+                    for (int space = 0; space < left_spaces; space++)
+                        (void) printf(" ");
+                    (void) printf("%s", x_str), free(x_str);
+                    for (int space = 0; space < right_spaces; space++)
+                        (void) printf(" ");
+                }
+            }
+            (void) printf("\n");
         }
     }
 
@@ -413,7 +597,7 @@ void print_display(Display *display)
 
 /********************************************************************************************
  * ystr:    Purpose: Converts a given number coordinate into a letter coordinate.           *
- *          Parameters: int32_t y_coordinate -> the number coordinate to be converted           *
+ *          Parameters: int32_t y_coordinate -> the number coordinate to be converted       *
  *          Return value: char * -> a pointer to a string containing the letter coordinate  *
  *          Side effects: - allocates memory                                                *
  ********************************************************************************************/
@@ -435,7 +619,13 @@ char *ystr(int32_t y_coordinate)
     return str;
 }
 
-// calculates the number of letter-digits (eg, A is 1 digit, ZGM is 3 digits) the conversion of the given numerical input will result in.
+/******************************************************************************************************************************
+ * calculate_letter_digits:    Purpose: Calculates the number of letter-digits (eg, A is 1 digit, ZGM is 3 digits)            *
+ *                                       the conversion of the given numerical input will result in.                          *
+ *                             Parameters: int32_t number_to_convert -> the decimal number to be converted into letter-digits *
+ *                             Return value: int -> the number of letter-digits the conversion will result in.                *
+ *                             Side effects: none                                                                             *
+ ******************************************************************************************************************************/
 int calculate_letter_digits(int32_t number_to_convert)
 {
     int digits = 1;
@@ -444,7 +634,13 @@ int calculate_letter_digits(int32_t number_to_convert)
     return digits;
 }
 
-// calculates the lower boundary of the coordinate range created by the current exponentiation iteration
+/**************************************************************************************************************************************
+ * lower_boundary:    Purpose: Calculates the lower boundary of the coordinate range created by the current exponentiation iteration. *
+ *                    Parameters: - int base -> the base to be exponentiated (in this program, the number of letters in the alphabet) *
+ *                                - int power -> the largest power to be calculated (ie, the ordinal number of the current digit)     *
+ *                    Return value: int32_t -> the lower boundary of the current range                                                *
+ *                    Side effects: none                                                                                              *
+ **************************************************************************************************************************************/
 int32_t lower_boundary(int base, int power)
 {
     int32_t sum = 0;
@@ -453,7 +649,19 @@ int32_t lower_boundary(int base, int power)
     return sum;
 }
 
-// calculates the index (within the alphabet, A-Z : 0-25) of the current digit in the letter coordinate
+/**********************************************************************************************************************************************
+ * calculate_letter_index():    Purpose: Calculates the index (within the alphabet, A-Z : 0-25) of the current digit in the letter coordinate.*
+ *                              Parameters: - int32_t current_number -> the decimal number corresponding to the digit to be calculated        *
+ *                                          - int current_digit -> the ordinal of the digit to be calculated                                  *
+ *                                                                  (1 is far right, 2 is next to it, etc)                                    *
+ *                                          - int32_t lower_boundary -> the lower boundary of                                                 *
+ *                                                                       the coordinate range created by                                      *
+ *                                                                       the previous exponentiation iteration                                *
+ *                                                                       (aka, the return value of calling lower_boundary()                   *
+ *                                                                       on the previous digit)                                               *
+ *                              Return value: int -> the calculated alphabetical index                                                        *
+ *                              Side effects: none                                                                                            *
+ **********************************************************************************************************************************************/
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary)
 {
     int counter = 0;
@@ -463,6 +671,26 @@ int calculate_letter_index(int32_t current_number, int current_digit, int32_t lo
         counter++;
     }
     return counter - 1;
+}
+
+/**********************************************************************************************
+ * find_room():    Purpose: Finds the memory address of the Room matching the given id        *
+ *                 Parameters: - Room *root -> the root node of the Rooms linked list         *
+ *                             - long long room_id -> the id of the Room being searched for   *
+ *                 Return value: Room * -> a pointer to the searched-for Room                 *
+ *                 Side effects: none                                                         *
+ **********************************************************************************************/
+Room *find_room(Room *root, long long room_id)
+{
+    Room *current = root;
+    while (current != NULL)
+    {
+        if (current->id == room_id)
+            return current;
+        current = current->next_room;
+    }
+
+    return NULL;
 }
 
 /*******************************************************************************************
@@ -516,5 +744,6 @@ void free_rooms(Room *r)
 
 //FUTURE TODOS:
 // - Make height/width of editor adjustable for different sized monitors. Maybe implement a settings menu with defaults?
+// - Make height/width of editor a variable based on internal reading of terminal window size (including if user re-sizes terminal midway through execution).
 // - Add ability to turn off and back on the axis labels.
 // - Add ability to declare the edge of the map and make rooms connect to the beginning of a different map on the same level, to make it more feasable to build large spaces by dividing them into separate chunks each on their own map.

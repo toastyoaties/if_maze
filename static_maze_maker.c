@@ -75,6 +75,7 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
 long long **create_initial_layout(Map *map_to_display);
+void free_layout(long long **layout, int32_t height);
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root);
 void print_display(Display *display, Room *root);
 char *ystr(int32_t y_coordinate);
@@ -142,6 +143,8 @@ int main(void)
     {
         default: break;
         case 1: (void) printf("Encountered unexpected error. Error code 1: Unable to find room with matching coordinates.\n"); break;
+        case 2: (void) printf("Encountered error. Error code 2: Unable to allocate space for the layout's worth of rows.\n"); break;
+        case 3: (void) printf("Encountered error. Error code 3: Unable to allocate space for the columns in one or all of the layout's rows.\n"); break;
     }
     return error_code;
 }
@@ -274,17 +277,23 @@ Map *edit_map(Map *editable_map)
     //TODO
 
     // Print grid with x & y axes numbered & lettered (like Battleship board)
-    long long (*layout)[editable_map->width] = create_initial_layout(editable_map);
+    long long **layout = create_initial_layout(editable_map);
+    if (error_code)
+    {
+        free_layout(layout, editable_map->height);
+        return editable_map;
+    }
 
     Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
 
-    print_display(&display, editable_map->root);
+    print_display(display, editable_map->root);
     if (error_code)
     {
-        free(layout);
+        free_layout(layout, editable_map->height);
         free(display);
         return editable_map;
     }
+    while (getchar() != '\n');
 
     // Prompt for cursor start location (represented by *)
     //  Alternately, start cursor on top line, furthest room to left.
@@ -318,7 +327,7 @@ Map *edit_map(Map *editable_map)
 
     //TODO: Allow saving map before returning (returning leads to freeing--aka losing--map from memory)
     //TODO: Warns when about to return without saving
-    free(layout);
+    free_layout(layout, editable_map->height);
     free(display);
     return editable_map;
 }
@@ -334,8 +343,23 @@ Map *edit_map(Map *editable_map)
 long long **create_initial_layout(Map *map_to_display)
 {
     //Create 2D grid to store room ids:
-    long long (*layout)[map_to_display->width]; //<-represents a single row in the form of a pointer to an array of <width> ints
-    layout = malloc(sizeof(*layout) * map_to_display->height); // Allocating memory for <height> number of rows
+    int32_t ncols = map_to_display->width, nrows = map_to_display->height;
+    long long **layout = malloc(sizeof(int32_t *) * nrows);
+    if (layout == NULL)
+    {
+        error_code = 2;
+        return NULL;
+    }
+
+    for (int i = 0; i < nrows; i++)
+    {
+        layout[i] = malloc(sizeof(int32_t) * ncols);
+        if (layout[i] == NULL)
+        {
+            error_code = 3;
+            return NULL;
+        }
+    }
 
     for (int32_t y = 0; y < map_to_display->height; y++)
     {
@@ -355,6 +379,24 @@ long long **create_initial_layout(Map *map_to_display)
     }
 
     return layout;
+}
+
+/****************************************************************************************************
+ * free_layout:    Purpose: Frees all rows in layout, followed by layout.                           *
+ *                 Parameters: - long long **layout -> the layout to be freed                       *
+ *                             - int32_t height -> the number of rows in the layout                 *
+ *                 Return value: none                                                               *
+ *                 Side effects: - Frees all memory associated with given layout. Cannot be undone. *
+ ****************************************************************************************************/
+void free_layout(long long **layout, int32_t height)
+{
+    for (int32_t y = height - 1; y > 0; y--)
+    {
+        free(layout[y]);
+    }
+
+    free(layout);
+    return;
 }
 
 /****************************************************************************************************************
@@ -454,12 +496,14 @@ void print_display(Display *display, Room *root)
         for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
             (void) printf(" ");
         (void) printf(" ");
+
         // Print visible rooms:
         for (int x = 0; x < display->width; x++)
         {
             // Print spaces where left hyphens & left side of room would be on room line:
             for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                 (void) printf(" ");
+
             // Find pointer to room matching current coordinates:
             Room *current = find_room(root, display->layout[y][x]);
             if (current == NULL)
@@ -467,6 +511,7 @@ void print_display(Display *display, Room *root)
                 error_code = 1;
                 return;
             }
+
             // Print either passageway or spaces depending on north exit per room
             //      (this code assumes a north exit always corresponds with a south exit above):
             if (current->exists && current->exits[NORTH])

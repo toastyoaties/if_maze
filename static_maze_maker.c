@@ -163,6 +163,7 @@ int main(void)
  *                              - Prints to stdout.                                      *
  *                              - Reads from stdin.                                      *
  *                              - Allocates memory.                                      *
+ *                              - Edits global variable "error_code"                     *
  *****************************************************************************************/
 Map *create_map(void)
 {
@@ -239,6 +240,7 @@ Map *create_map(void)
  *                           long long room_id -> the id to be assigned to the room          *
  *               Return value: Room * -> a pointer to the new room                           *
  *               Side effects: - Allocates memory.                                           *
+ *                             - Edits global variable "error_code".                         *
  *********************************************************************************************/
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
 {
@@ -375,6 +377,7 @@ Map *edit_map(Map *editable_map)
  *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
  *                            Return value: long long ** -> a pointer to the array                        *
  *                            Side effects: - allocates memory                                            *
+ *                                          - edits global variable "error_code"                          *
  **********************************************************************************************************/
 long long **create_initial_layout(Map *map_to_display)
 {
@@ -444,6 +447,7 @@ void free_layout(long long **layout, int32_t height)
  *                                        int32_t array_width -> the width of the 2D layout array               *
  *                            Return value: Display * -> a pointer to the initialized Display                   *
  *                            Side effects: - allocates memory                                                  *
+ *                                          - edits global variable "error_code"                                *
  ****************************************************************************************************************/
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root)
 {
@@ -490,6 +494,7 @@ Display *initialize_display(long long **layout_array, int32_t array_height, int3
  *                      Return value: none                                               *
  *                      Side effects: - prints to stdout                                 *
  *                                    - frees memory allocated during printing process   *
+ *                                    - edits global variable "error_code"               *
  *****************************************************************************************/
 void print_display(Display *display, Room *root)
 {
@@ -696,6 +701,7 @@ void print_display(Display *display, Room *root)
  *          Parameters: int32_t y_coordinate -> the number coordinate to be converted       *
  *          Return value: char * -> a pointer to a string containing the letter coordinate  *
  *          Side effects: - allocates memory                                                *
+ *                        - edits global variable "error_code"                              *
  ********************************************************************************************/
 char *ystr(int32_t y_coordinate)
 {

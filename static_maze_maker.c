@@ -223,7 +223,7 @@ Map *create_map(void)
                 {
                     attach_point = attach_point->next_room;
                 }
-                attach_point = r;
+                attach_point->next_room = r;
             }
         }
     }
@@ -339,6 +339,7 @@ Map *edit_map(Map *editable_map)
     // Allow commands for establishing entrances and exits to maze (including interior ones)
     // Allow commands for adding id aliases (ids are established programmatically)
     // Allow commands for scrolling view of grid cardinally (in this case, meaning up, down, left, right)
+    // Let attempts at moving the cursor past the edges of the grid cause the grid to scroll (if there are rooms in that direction).
     // Allow commands for saving maze to file and reading maze from file
     // Allow commands for translating entire map plus or minus x x-values or y y-values
     // Allow commands to establish critical path (in separate ANSI color)
@@ -364,17 +365,19 @@ Map *edit_map(Map *editable_map)
 long long **create_initial_layout(Map *map_to_display)
 {
     //Create 2D grid to store room ids:
-    int32_t ncols = map_to_display->width, nrows = map_to_display->height;
-    long long **layout = malloc(sizeof(int32_t *) * nrows);
+    int32_t ncols = map_to_display->width;
+    int32_t nrows = map_to_display->height;
+
+    long long **layout = malloc(sizeof(long long *) * nrows);
     if (layout == NULL)
     {
         error_code = 2;
         return NULL;
     }
 
-    for (int i = 0; i < nrows; i++)
+    for (int32_t i = 0; i < nrows; i++)
     {
-        layout[i] = malloc(sizeof(int32_t) * ncols);
+        layout[i] = malloc(sizeof(long long) * (ncols));
         if (layout[i] == NULL)
         {
             error_code = 3;
@@ -382,9 +385,9 @@ long long **create_initial_layout(Map *map_to_display)
         }
     }
 
-    for (int32_t y = 0; y < map_to_display->height; y++)
+    for (int32_t y = 0; y < nrows; y++)
     {
-        for (int32_t x = 0; x < map_to_display->width; x++)
+        for (int32_t x = 0; x < ncols; x++)
         {
             Room *current = map_to_display->root;
             while (current != NULL)
@@ -411,7 +414,7 @@ long long **create_initial_layout(Map *map_to_display)
  ****************************************************************************************************/
 void free_layout(long long **layout, int32_t height)
 {
-    for (int32_t y = height - 1; y > 0; y--)
+    for (int32_t y = 0; y < height; y++)
     {
         free(layout[y]);
     }
@@ -508,15 +511,49 @@ void print_display(Display *display, Room *root)
     int right_hyphens = hyphens - left_hyphens;
 
     /* Example: *******************
+     *      20   21   22          *
      *      |    |                *
      *AAA -( )--( )--( )-         *
      *      |         |           *
      *AAB  ( )  ( )--( )          *
      *      |                     *
-     *      20   21   22          *
      ******************************/
 
     // Start printing display:
+    // First, print x-coordinates row:
+    // Print spaces where letter coordinates would go:
+    for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
+        (void) printf(" ");
+    (void) printf(" ");
+    // Print x-coordinates:
+    for (int x = 0; x < display->width; x++)
+    {
+        // Create x-coordinate string:
+        int needed_strlen = snprintf(NULL, 0, "%d", x + display->x_offset);
+        char *x_str = malloc(sizeof(char) * (needed_strlen + 1));
+        if (x_str == NULL)
+        {
+            error_code = 7;
+            return;
+        }
+        (void) snprintf(x_str, sizeof(x_str), "%d", x + display->x_offset);
+        // Print centered x-coordinate string:
+        if (cell_width == needed_strlen + space_on_both_sides)
+            (void) printf(" %s ", x_str), free(x_str);
+        else
+        {
+            int spaces_needed = cell_width - needed_strlen;
+            int left_spaces = spaces_needed / 2;
+            int right_spaces = spaces_needed - left_spaces;
+            for (int space = 0; space < left_spaces; space++)
+                (void) printf(" ");
+            (void) printf("%s", x_str), free(x_str);
+            for (int space = 0; space < right_spaces; space++)
+                (void) printf(" ");
+        }
+    }
+    (void) printf("\n");
+
     for (int y = 0; y < display->height; y++)
     {
         // Row above room:
@@ -531,12 +568,11 @@ void print_display(Display *display, Room *root)
             // Print spaces where left hyphens & left side of room would be on room line:
             for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                 (void) printf(" ");
-printf("y: %d\nx: %d\ndisplay->layout[y][x]: %lld\n", y, x, display->layout[y][x]);
+
             // Find pointer to room matching current coordinates:
             Room *current = find_room(root, display->layout[y][x]);
             if (current == NULL)
             {
-printf("uh-oh 1\n");
                 error_code = 1;
                 return;
             }
@@ -569,7 +605,6 @@ printf("uh-oh 1\n");
             Room *current = find_room(root, display->layout[y][x]);
             if (current == NULL)
             {
-printf("uh-oh 2\n");
                 error_code = 1;
                 return;
             }
@@ -622,7 +657,6 @@ printf("uh-oh 2\n");
                 Room *current = find_room(root, display->layout[y][x]);
                 if (current == NULL)
                 {
-printf("uh-oh 3\n");
                     error_code = 1;
                     return;
                 }
@@ -635,40 +669,6 @@ printf("uh-oh 3\n");
                 // Print spaces where right side of room & right hyphens would be on room line:
                 for (int hyphen = 0; hyphen < right_hyphens + 1; hyphen++) // + 1 is for the right parenthesis of the room.
                     (void) printf(" ");
-            }
-            (void) printf("\n");
-
-            // Finally, print x-coordinates row:
-            // Print spaces where letter coordinates would go:
-            for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
-                (void) printf(" ");
-            (void) printf(" ");
-            // Print x-coordinates:
-            for (int x = 0; x < display->width; x++)
-            {
-                // Create x-coordinate string:
-                int needed_strlen = snprintf(NULL, 0, "%d", x + display->x_offset);
-                char *x_str = malloc(sizeof(char) * (needed_strlen + 1));
-                if (x_str == NULL)
-                {
-                    error_code = 7;
-                    return;
-                }
-                (void) snprintf(x_str, sizeof(x_str), "%d", x + display->x_offset);
-                // Print centered x-coordinate string:
-                if (cell_width == needed_strlen + space_on_both_sides)
-                    (void) printf(" %s ", x_str), free(x_str);
-                else
-                {
-                    int spaces_needed = cell_width - needed_strlen;
-                    int left_spaces = spaces_needed / 2;
-                    int right_spaces = spaces_needed - left_spaces;
-                    for (int space = 0; space < left_spaces; space++)
-                        (void) printf(" ");
-                    (void) printf("%s", x_str), free(x_str);
-                    for (int space = 0; space < right_spaces; space++)
-                        (void) printf(" ");
-                }
             }
             (void) printf("\n");
         }

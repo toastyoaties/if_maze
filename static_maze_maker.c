@@ -207,11 +207,11 @@ Map *create_map(void)
     // Initialize linked list of rooms, starting from (0,0):
     created_map->root = NULL;
     long long next_id = 0;
-    for (int32_t i = 0; i < created_map->height; i++)
+    for (int32_t y = 0; y < created_map->height; y++)
     {
-        for (int32_t j = 0; j < created_map->width; j++)
+        for (int32_t x = 0; x < created_map->width; x++)
         {
-            Room *r = make_room(i, j, next_id++);
+            Room *r = make_room(y, x, next_id++);
             if (error_code) return created_map;
             if (created_map->root == NULL)
             {
@@ -236,6 +236,7 @@ Map *create_map(void)
  * make_room:    Purpose: Allocates memory for and initializes single room.                  *
  *               Parameters: int32_t y_coordinate -> the y-coordinate to assign to the room  *
  *                           int32_t x_coordinate -> the x-coordinate to assign to the room  *
+ *                           long long room_id -> the id to be assigned to the room          *
  *               Return value: Room * -> a pointer to the new room                           *
  *               Side effects: - Allocates memory.                                           *
  *********************************************************************************************/

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
@@ -288,9 +289,9 @@ Map *load_map(void)
  ********************************************************************************************/
 Map *edit_map(Map *editable_map)
 {
-    CLEAR_CONSOLE;
-
     if (error_code) return editable_map;
+
+    CLEAR_CONSOLE;
 
     // Print grid with x & y axes numbered & lettered (like Battleship board)
     long long **layout = create_initial_layout(editable_map);
@@ -307,14 +308,26 @@ Map *edit_map(Map *editable_map)
         return editable_map;
     }
 
-    print_display(display, editable_map->root);
-    if (error_code)
+    // Interaction Loop:
+    for (;;)
     {
-        free_layout(layout, editable_map->height);
-        free(display);
-        return editable_map;
+        // Print display:
+        print_display(display, editable_map->root);
+        if (error_code)
+        {
+            free_layout(layout, editable_map->height);
+            free(display);
+            return editable_map;
+        }
+        while (getchar() != '\n');
+
+        // TODO: Print command prompt (incl "help for help")
+        // TODO: Accept input
+        // TODO: Parse user command
+        // TODO: Update program state based on command
+        // TODO: Update display based on updated state.
+        // TODO: Add save/quit functionality.
     }
-    while (getchar() != '\n');
 
     // Prompt for cursor start location (represented by *)
     //  Alternately, start cursor on top line, furthest room to left.

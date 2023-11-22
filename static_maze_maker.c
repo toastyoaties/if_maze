@@ -253,9 +253,9 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
 
     r->y_coordinate = y_coordinate, r->x_coordinate = x_coordinate;
     r->exists = true, r->id = room_id, r->next_room = NULL;
-    for (int i = 0; i < NUM_CARDINAL_DIRECTIONS; i++)
+    for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
     {
-        r->exits[i] = 0;
+        r->exits[cardinal_direction] = 0;
     }
 
     return r;
@@ -712,8 +712,8 @@ char *ystr(int32_t y_coordinate)
         error_code = 8;
         return NULL;
     }
-    for (int i = 0; i < letters_wide + 1; i++)
-        str[i] = '\0';
+    for (int index = 0; index < letters_wide + 1; index++)
+        str[index] = '\0';
     int digit = letters_wide;
     int str_index = 0;
     while (digit > 0)

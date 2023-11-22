@@ -134,8 +134,7 @@ int main(void)
             case 2: free_map(edit_map(load_map())); break;
             default: goto quit;
         }
-        if (error_code)
-            break;
+        if (error_code) break;
     }
     // Exit program:
     quit:
@@ -143,8 +142,13 @@ int main(void)
     {
         default: break;
         case 1: (void) printf("Encountered unexpected error. Error code 1: Unable to find room with matching coordinates.\n"); break;
-        case 2: (void) printf("Encountered error. Error code 2: Unable to allocate space for the layout's worth of rows.\n"); break;
-        case 3: (void) printf("Encountered error. Error code 3: Unable to allocate space for the columns in one or all of the layout's rows.\n"); break;
+        case 2: (void) printf("Encountered error. Error code 2: Unable to allocate memory for the layout's worth of rows.\n"); break;
+        case 3: (void) printf("Encountered error. Error code 3: Unable to allocate memory for the columns in one or all of the layout's rows.\n"); break;
+        case 4: (void) printf("Encountered error. Error code 4: Unable to allocate memory for map.\n"); break;
+        case 5: (void) printf("Encountered error. Error code 5: Unable to allocate memory for one or more of the map's rooms.\n"); break;
+        case 6: (void) printf("Encountered error. Error code 6: Unable to allocate memory for the display.\n"); break;
+        case 7: (void) printf("Encountered error. Error code 7: Unable to allocate memory for x_str.\n"); break;
+        case 8: (void) printf("Encountered error. Error code 8: Unable to allcoate memory for ystr.\n"); break;
     }
     return error_code;
 }
@@ -165,6 +169,11 @@ Map *create_map(void)
     CLEAR_CONSOLE;
     (void) printf("Creating blank map...\n");
     Map *created_map = malloc(sizeof(Map));
+    if (created_map == NULL)
+    {
+        error_code = 4;
+        return NULL;
+    }
 
     // Prompt for initial height:
     created_map->height = 0;
@@ -202,6 +211,7 @@ Map *create_map(void)
         for (int32_t j = 0; j < created_map->width; j++)
         {
             Room *r = make_room(i, j, next_id++);
+            if (error_code) return created_map;
             if (created_map->root == NULL)
             {
                 created_map->root = r;
@@ -231,6 +241,12 @@ Map *create_map(void)
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
 {
     Room *r = malloc(sizeof(Room));
+    if (r == NULL)
+    {
+        error_code = 5;
+        return NULL;
+    }
+
     r->y_coordinate = y_coordinate, r->x_coordinate = x_coordinate;
     r->exists = true, r->id = room_id, r->next_room = NULL;
     for (int i = 0; i < NUM_CARDINAL_DIRECTIONS; i++)
@@ -274,7 +290,7 @@ Map *edit_map(Map *editable_map)
 {
     CLEAR_CONSOLE;
 
-    //TODO
+    if (error_code) return editable_map;
 
     // Print grid with x & y axes numbered & lettered (like Battleship board)
     long long **layout = create_initial_layout(editable_map);
@@ -285,6 +301,11 @@ Map *edit_map(Map *editable_map)
     }
 
     Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
+    if (error_code)
+    {
+        free_layout(layout, editable_map->height);
+        return editable_map;
+    }
 
     print_display(display, editable_map->root);
     if (error_code)
@@ -410,6 +431,11 @@ void free_layout(long long **layout, int32_t height)
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root)
 {
     Display *d = malloc(sizeof(Display));
+    if (d == NULL)
+    {
+        error_code = 6;
+        return NULL;
+    }
 
     d->layout = layout_array;
     d->height = array_height > MAX_DISPLAY_HEIGHT ? MAX_DISPLAY_HEIGHT : array_height;
@@ -446,6 +472,7 @@ Display *initialize_display(long long **layout_array, int32_t array_height, int3
  *                      Parameters: Display *display -> the Display to be printed.       *
  *                      Return value: none                                               *
  *                      Side effects: - prints to stdout                                 *
+ *                                    - frees memory allocated during printing process   *
  *****************************************************************************************/
 void print_display(Display *display, Room *root)
 {
@@ -461,6 +488,7 @@ void print_display(Display *display, Room *root)
 
     // Find max screen length of y-coordinates to display, for formatting purposes:
     char *longest_y_string = ystr(display->height - 1 + display->y_offset);
+    if (error_code) return;
     int longest_letter_digits = strlen(longest_y_string);
     free(longest_y_string);
 
@@ -503,11 +531,12 @@ void print_display(Display *display, Room *root)
             // Print spaces where left hyphens & left side of room would be on room line:
             for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                 (void) printf(" ");
-
+printf("y: %d\nx: %d\ndisplay->layout[y][x]: %lld\n", y, x, display->layout[y][x]);
             // Find pointer to room matching current coordinates:
             Room *current = find_room(root, display->layout[y][x]);
             if (current == NULL)
             {
+printf("uh-oh 1\n");
                 error_code = 1;
                 return;
             }
@@ -527,6 +556,7 @@ void print_display(Display *display, Room *root)
         // Row with room:
         // Print letter coordinates:
         char *str = ystr(y + display->y_offset);
+        if (error_code) return;
         int letter_digits = strlen(str);
         if (longest_letter_digits > letter_digits)
             for (int letter_digit = 0; letter_digit < longest_letter_digits - letter_digits; letter_digit++)
@@ -539,6 +569,7 @@ void print_display(Display *display, Room *root)
             Room *current = find_room(root, display->layout[y][x]);
             if (current == NULL)
             {
+printf("uh-oh 2\n");
                 error_code = 1;
                 return;
             }
@@ -591,6 +622,7 @@ void print_display(Display *display, Room *root)
                 Room *current = find_room(root, display->layout[y][x]);
                 if (current == NULL)
                 {
+printf("uh-oh 3\n");
                     error_code = 1;
                     return;
                 }
@@ -617,6 +649,11 @@ void print_display(Display *display, Room *root)
                 // Create x-coordinate string:
                 int needed_strlen = snprintf(NULL, 0, "%d", x + display->x_offset);
                 char *x_str = malloc(sizeof(char) * (needed_strlen + 1));
+                if (x_str == NULL)
+                {
+                    error_code = 7;
+                    return;
+                }
                 (void) snprintf(x_str, sizeof(x_str), "%d", x + display->x_offset);
                 // Print centered x-coordinate string:
                 if (cell_width == needed_strlen + space_on_both_sides)
@@ -650,6 +687,11 @@ char *ystr(int32_t y_coordinate)
 {
     int letters_wide = calculate_letter_digits(y_coordinate);
     char *str = malloc(sizeof(char) * (letters_wide + 1));
+    if (str == NULL)
+    {
+        error_code = 8;
+        return NULL;
+    }
     for (int i = 0; i < letters_wide + 1; i++)
         str[i] = '\0';
     int digit = letters_wide;

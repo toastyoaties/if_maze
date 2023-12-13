@@ -71,6 +71,7 @@ typedef struct display
 int error_code = 0;
 
 /* Prototypes for non-main functions */
+void gobble_line(void);
 Map *create_map(void);
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
@@ -120,7 +121,7 @@ int main(void)
         for (;;)
         {
             (void) printf("Enter option number:\n>");
-            (void) scanf("%d", &selection); while (getchar() != '\n');
+            (void) scanf("%d", &selection), gobble_line();
 
             if (selection < 1 || selection > 3)
                 (void) printf("Please pick from the available options.\n");
@@ -156,6 +157,19 @@ int main(void)
 
 /* Definitions of other functions */
 /*****************************************************************************************
+ * gobble_line():    Purpose: Reads & discards whatever is in stdin                      *
+ *                   Parameters: none                                                    *
+ *                   Return value: none                                                  *
+ *                   Side effects: - Reads from stdin                                    *
+ *****************************************************************************************/
+void gobble_line(void)
+{
+    char c = 0;
+    while ((c = getchar()) != '\n' && c != EOF);
+    return;
+}
+
+/*****************************************************************************************
  * create_map:    Purpose: Creates blank map for further editing.                        *
  *                Parameters: none                                                       *
  *                Return value: Map * -> The created map, to be passed into editing.     *
@@ -182,7 +196,7 @@ Map *create_map(void)
     for (;;)
     {
         (void) printf("Enter desired initial height of map: ");
-        (void) scanf("%d", &(created_map->height)); while (getchar() != '\n');
+        (void) scanf("%d", &(created_map->height)), gobble_line();
         if (created_map->height < 1)
             (void) printf("Please enter an integer greater than zero.\n");
         else if (created_map->height > MAX_COORDINATE)
@@ -196,7 +210,7 @@ Map *create_map(void)
     for (;;)
     {
         (void) printf("Enter desired initial width of map: ");
-        (void) scanf("%d", &(created_map->width)); while (getchar() != '\n');
+        (void) scanf("%d", &(created_map->width)), gobble_line();
         if (created_map->width < 1)
             (void) printf("Please enter an integer greater than zero.\n");
         else if (created_map->width > MAX_COORDINATE)
@@ -322,7 +336,10 @@ Map *edit_map(Map *editable_map)
             free(display);
             return editable_map;
         }
-        while (getchar() != '\n');
+
+        parse_command(get_command("Enter command (type 'help' for help):\n>"));
+
+        gobble_line();
 
         // TODO: Print command prompt (incl "help for help")
         // TODO: Accept input

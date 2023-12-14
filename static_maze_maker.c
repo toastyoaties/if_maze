@@ -4,6 +4,8 @@
  * 1.0 date:                                                                                        *
  * Last modification date:                                                                          *
  * Author: Ryan Wells                                                                               *
+ * Additional credit: Thanks to Josh Taylor (joshtaylor314.dev | github.com/babybluesedans)         *
+ *                      for the initial drafts of calculate_letter_digits() and lower_boundary()    *
  * Purpose: Tool for creating hand-made mazes for use in IF maze exploration program                *
  *          (preventing the need for coding each maze individually).                                *
  ****************************************************************************************************/
@@ -63,6 +65,12 @@ typedef struct display
     int32_t x_offset;
     long long cursor_id;
 } Display;
+
+typedef struct command_c
+{
+    int c;
+    struct command_char *next_c;
+} Command_C;
 
 /* Declarations of External Variables */
 // none
@@ -151,6 +159,7 @@ int main(void)
         case 6: (void) printf("Encountered error. Error code 6: Unable to allocate memory for the display.\n"); break;
         case 7: (void) printf("Encountered error. Error code 7: Unable to allocate memory for x_str.\n"); break;
         case 8: (void) printf("Encountered error. Error code 8: Unable to allcoate memory for ystr.\n"); break;
+        case 9: (void) printf("Encountered error. Error code 9: Unable to allocate memory for one or more characters in the command string.\n"); break;
     }
     return error_code;
 }
@@ -337,7 +346,23 @@ Map *edit_map(Map *editable_map)
             return editable_map;
         }
 
-        parse_command(get_command("Enter command (type 'help' for help):\n>"));
+        if (buffered_mode)
+        {
+            obey_command(get_command("Enter command (type 'help' for help):\n>"));
+            if (error_code)
+            {
+                free_layout(layout, editable_map->height);
+                free(display);
+                return editable_map;
+            }
+        }
+        else if (unix_mode)
+        {
+            //TODO
+        }
+        else if (windows_mode)
+        {
+        }
 
         gobble_line();
 
@@ -815,6 +840,77 @@ Room *find_room(Room *root, long long room_id)
     }
 
     return NULL;
+}
+
+/*****************************************************************************************
+ * get_command():    Purpose: ONLY USE IN BUFFERED MODE                                                        *
+ *                      Parameters (and the meaning of each):                            *
+ *                      Return value:                                                    *
+ *                      Side effects (such as modifying external variables,              *
+ *                          printing to stdout, or exiting the program): - Modifies global variable "error_code"                *
+ *****************************************************************************************/
+int get_command(char *prompt)
+{
+    Command_C *root_c = NULL;
+    int character = 0;
+    int character_count = 0;
+
+    (void) printf("%s", prompt);
+
+    while ((character = getchar()) != '\n' && character != EOF)
+    {
+        Command_C *c = malloc(sizeof(Command_C));
+        if (c == NULL)
+        {
+            error_code = 9;
+            free_command(root_c);
+            return -1;
+        }
+        c->c = character;
+        c->next_c = NULL;
+
+        if (root_c == NULL)
+            root_c = c;
+        else
+        {
+            Command_C *attach_point = root_c;
+            while (attach_point->next_c != NULL)
+                attach_point = attach_point->next_c;
+            attach_point->next_c = c;
+        }
+
+        character_count++;
+    }
+
+    char command[character_count + 1];
+    Command_C *current = root_c;
+    for (int index = 0; index < character_count; index++)
+    {
+        command[index] = current->c;
+        current = current->next_c;
+    }
+    command[character_count] = '\0';
+    free_command(root_c);
+
+    return parse_command(command);
+}
+
+void free_command(Command_C *root)
+{
+    if (root == NULL)
+        return;
+    free_command(root->next_c);
+    free(root);
+    return;
+}
+
+int parse_command(char *command)
+{
+}
+
+void obey_command(int command_code)
+{
+    // Interpret a -1 code as "pass; do nothing"
 }
 
 /*******************************************************************************************

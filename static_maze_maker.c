@@ -346,7 +346,7 @@ Map *edit_map(Map *editable_map)
             return editable_map;
         }
 
-        if (buffered_mode)
+        if (FORCE_BUFFERED_MODE)
         {
             obey_command(get_command("Enter command (type 'help' for help):\n>"));
             if (error_code)
@@ -356,11 +356,11 @@ Map *edit_map(Map *editable_map)
                 return editable_map;
             }
         }
-        else if (unix_mode)
+        else if (UNIX)
         {
             //TODO
         }
-        else if (windows_mode)
+        else if (WINDOWS)
         {
         }
 
@@ -882,17 +882,20 @@ int get_command(char *prompt)
         character_count++;
     }
 
-    char command[character_count + 1];
+    char *command = malloc(sizeof(char) * (character_count + 1));
     Command_C *current = root_c;
     for (int index = 0; index < character_count; index++)
     {
-        command[index] = current->c;
+        *(command + index) = current->c;
         current = current->next_c;
     }
     command[character_count] = '\0';
     free_command(root_c);
 
-    return parse_command(command);
+    int command_code = parse_command(command);
+    free(command);
+
+    return command_code;
 }
 
 void free_command(Command_C *root)

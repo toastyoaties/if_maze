@@ -10,6 +10,43 @@
  *          (preventing the need for coding each maze individually).                                *
  ****************************************************************************************************/
 
+// /* OS-Dependent Conditional Compilation Section */
+// //UNIX (only):
+// #if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+// #define UNIX
+// #include <termios.h>
+// #include <unistd.h>
+// #define STDIN_FD 0 //0 is the file descriptor for standard input (1 is for std output, 2 is for std err)
+// #else
+// #undef UNIX
+// #endif
+
+// //Windows (only):
+// #if defined(_WIN32) && !(defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+// #define WINDOWS
+// #include <conio.h>
+// #else
+// #undef WINDOWS
+// #endif
+
+// //Neither:
+// #if !defined(_WIN32) && !(defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+// #define FORCE_BUFFERED_MODE
+// #else
+// #undef FORCE_BUFFERED_MODE
+// #endif
+
+// //Both!?:
+// #if defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+// #define FORCE_BUFFERED_MODE
+// #else
+// #undef FORCE_BUFFERED_MODE
+// #endif
+
+//Testing:
+#define FORCE_BUFFERED_MODE
+
+
 /* Preprocessing Directives (#include) */
 #include <stdbool.h>
 #include <stdio.h>
@@ -69,8 +106,15 @@ typedef struct display
 typedef struct command_c
 {
     int c;
-    struct command_char *next_c;
+    struct command_c *next_c;
 } Command_C;
+
+typedef struct gamestate
+{
+    bool quit;
+    Display *display;
+    Room *root;
+} Gamestate;
 
 /* Declarations of External Variables */
 // none
@@ -87,12 +131,19 @@ Map *edit_map(Map *editable_map);
 long long **create_initial_layout(Map *map_to_display);
 void free_layout(long long **layout, int32_t height);
 Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root);
-void print_display(Display *display, Room *root);
+Gamestate initialize_gamestate(Display *display, Room *root);
+void print_display(Gamestate *g);
 char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
 int32_t lower_boundary(int base, int power);
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
 Room *find_room(Room *root, long long room_id);
+int get_command(char *prompt);
+void free_command(Command_C *root);
+int parse_command(char *command);
+int caseless_strcmp(char *str1, char *str2);
+void obey_command(int command_code, Gamestate *g);
+void print_command_listing(void);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -161,6 +212,7 @@ int main(void)
         case 8: (void) printf("Encountered error. Error code 8: Unable to allcoate memory for ystr.\n"); break;
         case 9: (void) printf("Encountered error. Error code 9: Unable to allocate memory for one or more characters in the command string.\n"); break;
         case 10: (void) printf("Encountered error. Error code 10: Unable to allocate memory for stringified linked list of command characters.\n"); break;
+        case 11: (void) printf("Encountered unexpected error. Error code 11: Received unknown command_code; cannot obey.\n"); break;
     }
     return error_code;
 }
@@ -318,9 +370,7 @@ Map *edit_map(Map *editable_map)
 {
     if (error_code) return editable_map;
 
-    CLEAR_CONSOLE;
-
-    // Print grid with x & y axes numbered & lettered (like Battleship board)
+    // Create layout, display, and gamestate:
     long long **layout = create_initial_layout(editable_map);
     if (error_code)
     {
@@ -335,11 +385,15 @@ Map *edit_map(Map *editable_map)
         return editable_map;
     }
 
+    Gamestate gamestate = initialize_gamestate(display, editable_map->root);
+
     // Interaction Loop:
-    for (;;)
+    for (;!gamestate.quit;)
     {
+        CLEAR_CONSOLE;
+
         // Print display:
-        print_display(display, editable_map->root);
+        print_display(&gamestate);
         if (error_code)
         {
             free_layout(layout, editable_map->height);
@@ -347,25 +401,22 @@ Map *edit_map(Map *editable_map)
             return editable_map;
         }
 
-        if (FORCE_BUFFERED_MODE)
-        {
-            obey_command(get_command("Enter command (type 'help' for help):\n>"));
+        #ifdef FORCE_BUFFERED_MODE
+            obey_command(get_command("Enter command:\n>"), &gamestate);
             if (error_code)
             {
                 free_layout(layout, editable_map->height);
                 free(display);
                 return editable_map;
             }
-        }
-        else if (UNIX)
-        {
+        #endif
+        #ifdef UNIX
             //TODO
-        }
-        else if (WINDOWS)
-        {
-        }
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
 
-        gobble_line();
 
         // TODO: Print command prompt (incl "help for help")
         // TODO: Accept input
@@ -532,14 +583,32 @@ Display *initialize_display(long long **layout_array, int32_t array_height, int3
 }
 
 /*****************************************************************************************
+ * name_of_function:    Purpose:                                                         *
+ *                      Parameters (and the meaning of each):                            *
+ *                      Return value:                                                    *
+ *                      Side effects (such as modifying external variables,              *
+ *                          printing to stdout, or exiting the program):                 *
+ *****************************************************************************************/
+Gamestate initialize_gamestate(Display *display, Room *root)
+{
+    Gamestate g;
+
+    g.quit = false;
+    g.display = display;
+    g.root = root;
+
+    return g;
+}
+
+/*****************************************************************************************
  * print_display:       Purpose: Accepts a given Display and prints it to the screen.    *
- *                      Parameters: Display *display -> the Display to be printed.       *
+ *                      Parameters: Gamestate *g -> pointer to the current gamestate.    *
  *                      Return value: none                                               *
  *                      Side effects: - prints to stdout                                 *
  *                                    - frees memory allocated during printing process   *
  *                                    - edits global variable "error_code"               *
  *****************************************************************************************/
-void print_display(Display *display, Room *root)
+void print_display(Gamestate *g)
 {
     // typedef struct display
     // {
@@ -552,21 +621,21 @@ void print_display(Display *display, Room *root)
     // } Display;
 
     // Find max screen length of y-coordinates to display, for formatting purposes:
-    char *longest_y_string = ystr(display->height - 1 + display->y_offset);
+    char *longest_y_string = ystr(g->display->height - 1 + g->display->y_offset);
     if (error_code) return;
     int longest_letter_digits = strlen(longest_y_string);
     free(longest_y_string);
 
     // Find max screen length of x-coordinates to display, for formatting purposes:
-    int longest_number_digits = snprintf(NULL, 0, "%d", display->width - 1 + display->x_offset);
+    int longest_number_digits = snprintf(NULL, 0, "%d", g->display->width - 1 + g->display->x_offset);
 
     //Find printing width of one room + surrounding symbols:
     int min_cell_width = 5;
     int space_on_both_sides = 2;
     int cell_width = min_cell_width > longest_number_digits + space_on_both_sides ? min_cell_width : longest_number_digits + space_on_both_sides;
     int assumed_terminal_width_in_cols = MAX_DISPLAY_WIDTH * min_cell_width;
-    if (assumed_terminal_width_in_cols < display->width * cell_width)
-        display->width = assumed_terminal_width_in_cols / cell_width;
+    if (assumed_terminal_width_in_cols < g->display->width * cell_width)
+        g->display->width = assumed_terminal_width_in_cols / cell_width;
     int room_width = 3;
     int hyphens = cell_width - room_width;
     int left_hyphens = hyphens / 2;
@@ -588,17 +657,17 @@ void print_display(Display *display, Room *root)
         (void) printf(" ");
     (void) printf(" ");
     // Print x-coordinates:
-    for (int x = 0; x < display->width; x++)
+    for (int x = 0; x < g->display->width; x++)
     {
         // Create x-coordinate string:
-        int needed_strlen = snprintf(NULL, 0, "%d", x + display->x_offset);
+        int needed_strlen = snprintf(NULL, 0, "%d", x + g->display->x_offset);
         char *x_str = malloc(sizeof(char) * (needed_strlen + 1));
         if (x_str == NULL)
         {
             error_code = 7;
             return;
         }
-        (void) snprintf(x_str, sizeof(x_str), "%d", x + display->x_offset);
+        (void) snprintf(x_str, sizeof(x_str), "%d", x + g->display->x_offset);
         // Print centered x-coordinate string:
         if (cell_width == needed_strlen + space_on_both_sides)
             (void) printf(" %s ", x_str), free(x_str);
@@ -616,7 +685,7 @@ void print_display(Display *display, Room *root)
     }
     (void) printf("\n");
 
-    for (int y = 0; y < display->height; y++)
+    for (int y = 0; y < g->display->height; y++)
     {
         // Row above room:
         // Print spaces where letter coordinates would go:
@@ -625,14 +694,14 @@ void print_display(Display *display, Room *root)
         (void) printf(" ");
 
         // Print visible rooms:
-        for (int x = 0; x < display->width; x++)
+        for (int x = 0; x < g->display->width; x++)
         {
             // Print spaces where left hyphens & left side of room would be on room line:
             for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                 (void) printf(" ");
 
             // Find pointer to room matching current coordinates:
-            Room *current = find_room(root, display->layout[y][x]);
+            Room *current = find_room(g->root, g->display->layout[y][x]);
             if (current == NULL)
             {
                 error_code = 1;
@@ -653,7 +722,7 @@ void print_display(Display *display, Room *root)
 
         // Row with room:
         // Print letter coordinates:
-        char *str = ystr(y + display->y_offset);
+        char *str = ystr(y + g->display->y_offset);
         if (error_code) return;
         int letter_digits = strlen(str);
         if (longest_letter_digits > letter_digits)
@@ -661,10 +730,10 @@ void print_display(Display *display, Room *root)
                 (void) printf(" ");
         (void) printf("%s ", str), free(str); // y-coordinates are displayed as letters for user QoL
         // Print visible rooms:
-        for (int x = 0; x < display->width; x++)
+        for (int x = 0; x < g->display->width; x++)
         {
             // Find pointer to room matching current coordinates:
-            Room *current = find_room(root, display->layout[y][x]);
+            Room *current = find_room(g->root, g->display->layout[y][x]);
             if (current == NULL)
             {
                 error_code = 1;
@@ -683,7 +752,7 @@ void print_display(Display *display, Room *root)
                 (void) printf("(");
             else
                 (void) printf(" ");
-            if (current->id == display->cursor_id)
+            if (current->id == g->display->cursor_id)
                 (void) printf("*");
             else
                 (void) printf(" ");
@@ -703,20 +772,20 @@ void print_display(Display *display, Room *root)
         (void) printf("\n");
 
         // If this is last row of rooms, print row beneath room:
-        if (y == display->height - 1)
+        if (y == g->display->height - 1)
         {
             // Print spaces where letter coordinates would go:
             for (int letter_digit = 0; letter_digit < longest_letter_digits; letter_digit++)
                 (void) printf(" ");
             (void) printf(" ");
             // Print visible rooms:
-            for (int x = 0; x < display->width; x++)
+            for (int x = 0; x < g->display->width; x++)
             {
                 // Print spaces where left hyphens & left side of room would be on room line:
                 for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                     (void) printf(" ");
                 // Find pointer to room matching current coordinates:
-                Room *current = find_room(root, display->layout[y][x]);
+                Room *current = find_room(g->root, g->display->layout[y][x]);
                 if (current == NULL)
                 {
                     error_code = 1;
@@ -916,11 +985,55 @@ void free_command(Command_C *root)
 
 int parse_command(char *command)
 {
+    if (caseless_strcmp("help", command) || caseless_strcmp("h", command))
+        return 1;
+    else if (caseless_strcmp("quit", command) || caseless_strcmp("q", command))
+        return 2;
+    else
+        return 0;
 }
 
-void obey_command(int command_code)
+int caseless_strcmp(char *str1, char *str2)
 {
-    // Interpret a -1 code as "pass; do nothing"
+    int n1 = strlen(str1), n2 = strlen(str2);
+    if (n1 != n2)
+        return 0;
+    
+    for (int char_index = 0; char_index < n1; char_index++)
+    {
+        if (tolower(str1[char_index]) != tolower(str2[char_index]))
+            return 0;
+    }
+    return 1;
+}
+
+void obey_command(int command_code, Gamestate *g)
+{
+    switch (command_code)
+    {
+        default: error_code = 11; break;
+        case 0: (void) printf("Unknown command. Type 'help' or 'h' for help.\n"), gobble_line(); break;
+        case -1: /* Pass */ break;
+        case 1: print_command_listing(); break;
+        case 2: g->quit = true; break;
+    }
+}
+
+void print_command_listing(void)
+{
+    CLEAR_CONSOLE;
+    (void) printf("----Valid Commands----\n"
+                    "Function commands:\n"
+                    "\t(H)elp: prints this listing\n"
+                    "\t(Q)uit: returns to main menu\n"
+                    "Movement commands:\n"
+                    "\tUp or W: moves the cursor up one space\n"
+                    "\tDown or S: moves the cursor down one space\n"
+                    "\tLeft or A: moves the cursor left one space\n"
+                    "\tRight or D: moves the cursor right one space\n"
+                    "\nCommands are not case-sensitive.\n");
+    gobble_line();
+    return;
 }
 
 /*******************************************************************************************

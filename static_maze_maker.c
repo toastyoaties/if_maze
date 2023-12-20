@@ -160,6 +160,7 @@ int main(void)
         case 7: (void) printf("Encountered error. Error code 7: Unable to allocate memory for x_str.\n"); break;
         case 8: (void) printf("Encountered error. Error code 8: Unable to allcoate memory for ystr.\n"); break;
         case 9: (void) printf("Encountered error. Error code 9: Unable to allocate memory for one or more characters in the command string.\n"); break;
+        case 10: (void) printf("Encountered error. Error code 10: Unable to allocate memory for stringified linked list of command characters.\n"); break;
     }
     return error_code;
 }
@@ -883,6 +884,12 @@ int get_command(char *prompt)
     }
 
     char *command = malloc(sizeof(char) * (character_count + 1));
+    if (command == NULL)
+    {
+        error_code = 10;
+        free_command(root_c);
+        return -1;
+    }
     Command_C *current = root_c;
     for (int index = 0; index < character_count; index++)
     {

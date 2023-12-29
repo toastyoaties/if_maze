@@ -59,8 +59,8 @@
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
 #define NUM_CARDINAL_DIRECTIONS 4
-#define MAX_DISPLAY_HEIGHT 40
-#define MAX_DISPLAY_WIDTH 25
+#define MAX_DISPLAY_HEIGHT 22
+#define MAX_DISPLAY_WIDTH 30
 #define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
 #define NUM_LETTERS 26
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
@@ -95,7 +95,7 @@ typedef struct map
 
 typedef struct display
 {
-    long long **layout;
+    Room ***layout;
     int height;
     int width;
     int32_t y_offset;
@@ -128,16 +128,15 @@ Map *create_map(void);
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
 Map *edit_map(Map *editable_map);
-long long **create_initial_layout(Map *map_to_display);
-void free_layout(long long **layout, int32_t height);
-Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root);
+Room ***create_initial_layout(Map *map_to_display);
+void free_layout(Room ***layout, int32_t height);
+Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t array_width, Room *root);
 Gamestate initialize_gamestate(Display *display, Room *root);
 void print_display(Gamestate *g);
 char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
 int32_t lower_boundary(int base, int power);
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
-Room *find_room(Room *root, long long room_id);
 int get_command(char *prompt);
 void free_command(Command_C *root);
 int parse_command(char *command);
@@ -303,9 +302,10 @@ Map *create_map(void)
                 }
                 attach_point->next_room = r;
             }
+            printf("next_id: %lld\n", next_id);
         }
     }
-
+//TODO: WHY DOES x,y = 1000 cause infinite loop above? Fix this bug.
     return created_map;
 }
 
@@ -371,7 +371,7 @@ Map *edit_map(Map *editable_map)
     if (error_code) return editable_map;
 
     // Create layout, display, and gamestate:
-    long long **layout = create_initial_layout(editable_map);
+    Room ***layout = create_initial_layout(editable_map);
     if (error_code)
     {
         free_layout(layout, editable_map->height);
@@ -469,17 +469,17 @@ Map *edit_map(Map *editable_map)
  *                                     a 2D array containing the ids of rooms to display                  *
  *                                     as visualized map during editing.                                  *
  *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
- *                            Return value: long long ** -> a pointer to the array                        *
+ *                            Return value: Room *** -> a pointer to the array                        *
  *                            Side effects: - allocates memory                                            *
  *                                          - edits global variable "error_code"                          *
  **********************************************************************************************************/
-long long **create_initial_layout(Map *map_to_display)
+Room ***create_initial_layout(Map *map_to_display)
 {
     //Create 2D grid to store room ids:
     int32_t ncols = map_to_display->width;
     int32_t nrows = map_to_display->height;
 
-    long long **layout = malloc(sizeof(long long *) * nrows);
+    Room ***layout = malloc(sizeof(Room *) * nrows);
     if (layout == NULL)
     {
         error_code = 2;
@@ -488,7 +488,7 @@ long long **create_initial_layout(Map *map_to_display)
 
     for (int32_t i = 0; i < nrows; i++)
     {
-        layout[i] = malloc(sizeof(long long) * (ncols));
+        layout[i] = malloc(sizeof(Room) * (ncols));
         if (layout[i] == NULL)
         {
             error_code = 3;
@@ -505,7 +505,7 @@ long long **create_initial_layout(Map *map_to_display)
             {
                 if (current->y_coordinate == y && current->x_coordinate == x)
                 {
-                    layout[y][x] = current->id;
+                    layout[y][x] = current;
                     break;
                 }
                 current = current->next_room;
@@ -518,12 +518,12 @@ long long **create_initial_layout(Map *map_to_display)
 
 /****************************************************************************************************
  * free_layout:    Purpose: Frees all rows in layout, followed by layout.                           *
- *                 Parameters: - long long **layout -> the layout to be freed                       *
+ *                 Parameters: - Room ***layout -> the layout to be freed                       *
  *                             - int32_t height -> the number of rows in the layout                 *
  *                 Return value: none                                                               *
  *                 Side effects: - Frees all memory associated with given layout. Cannot be undone. *
  ****************************************************************************************************/
-void free_layout(long long **layout, int32_t height)
+void free_layout(Room ***layout, int32_t height)
 {
     for (int32_t y = 0; y < height; y++)
     {
@@ -536,14 +536,14 @@ void free_layout(long long **layout, int32_t height)
 
 /****************************************************************************************************************
  * initialize_display:        Purpose: Allocates room for, and initializes, a Display.                          *
- *                            Parameters: long long **layout_array -> pointer to the 2D layout array to display *
+ *                            Parameters: Room ***layout_array -> pointer to the 2D layout array to display *
  *                                        int32_t array_height -> the height of the 2D layout array             *
  *                                        int32_t array_width -> the width of the 2D layout array               *
  *                            Return value: Display * -> a pointer to the initialized Display                   *
  *                            Side effects: - allocates memory                                                  *
  *                                          - edits global variable "error_code"                                *
  ****************************************************************************************************************/
-Display *initialize_display(long long **layout_array, int32_t array_height, int32_t array_width, Room *root)
+Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t array_width, Room *root)
 {
     Display *d = malloc(sizeof(Display));
     if (d == NULL)
@@ -564,7 +564,7 @@ Display *initialize_display(long long **layout_array, int32_t array_height, int3
         {
             for (Room *current_room = root; current_room->next_room != NULL; current_room = current_room->next_room)
             {
-                if (current_room->id == d->layout[y][x])
+                if (current_room->id == d->layout[y][x]->id)
                 {
                     if (current_room->exists)
                     {
@@ -612,7 +612,7 @@ void print_display(Gamestate *g)
 {
     // typedef struct display
     // {
-    //     long long **layout;
+    //     Room ***layout;
     //     int height;
     //     int width;
     //     int32_t y_offset;
@@ -701,7 +701,7 @@ void print_display(Gamestate *g)
                 (void) printf(" ");
 
             // Find pointer to room matching current coordinates:
-            Room *current = find_room(g->root, g->display->layout[y][x]);
+            Room *current = g->display->layout[y][x];
             if (current == NULL)
             {
                 error_code = 1;
@@ -733,7 +733,7 @@ void print_display(Gamestate *g)
         for (int x = 0; x < g->display->width; x++)
         {
             // Find pointer to room matching current coordinates:
-            Room *current = find_room(g->root, g->display->layout[y][x]);
+            Room *current = g->display->layout[y][x];
             if (current == NULL)
             {
                 error_code = 1;
@@ -785,7 +785,7 @@ void print_display(Gamestate *g)
                 for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                     (void) printf(" ");
                 // Find pointer to room matching current coordinates:
-                Room *current = find_room(g->root, g->display->layout[y][x]);
+                Room *current = g->display->layout[y][x];
                 if (current == NULL)
                 {
                     error_code = 1;
@@ -890,26 +890,6 @@ int calculate_letter_index(int32_t current_number, int current_digit, int32_t lo
         counter++;
     }
     return counter - 1;
-}
-
-/**********************************************************************************************
- * find_room():    Purpose: Finds the memory address of the Room matching the given id        *
- *                 Parameters: - Room *root -> the root node of the Rooms linked list         *
- *                             - long long room_id -> the id of the Room being searched for   *
- *                 Return value: Room * -> a pointer to the searched-for Room                 *
- *                 Side effects: none                                                         *
- **********************************************************************************************/
-Room *find_room(Room *root, long long room_id)
-{
-    Room *current = root;
-    while (current != NULL)
-    {
-        if (current->id == room_id)
-            return current;
-        current = current->next_room;
-    }
-
-    return NULL;
 }
 
 /*****************************************************************************************

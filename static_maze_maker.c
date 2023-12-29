@@ -479,7 +479,7 @@ Room ***create_initial_layout(Map *map_to_display)
     int32_t ncols = map_to_display->width;
     int32_t nrows = map_to_display->height;
 
-    Room ***layout = malloc(sizeof(Room *) * nrows);
+    Room ***layout = malloc(sizeof(Room **) * nrows);
     if (layout == NULL)
     {
         error_code = 2;
@@ -488,7 +488,7 @@ Room ***create_initial_layout(Map *map_to_display)
 
     for (int32_t i = 0; i < nrows; i++)
     {
-        layout[i] = malloc(sizeof(Room) * (ncols));
+        layout[i] = malloc(sizeof(Room *) * (ncols));
         if (layout[i] == NULL)
         {
             error_code = 3;

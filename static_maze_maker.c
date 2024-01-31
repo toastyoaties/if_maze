@@ -114,6 +114,7 @@ typedef struct gamestate
     bool quit;
     Display *display;
     Room *root;
+    Room *current_focus;
 } Gamestate;
 
 /* Declarations of External Variables */
@@ -333,6 +334,8 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
     {
         r->exits[cardinal_direction] = 0;
     }
+
+    r->id_alias = NULL;
 
     return r;
 }
@@ -596,6 +599,7 @@ Gamestate initialize_gamestate(Display *display, Room *root)
     g.quit = false;
     g.display = display;
     g.root = root;
+    g.current_focus = display->layout[display->y_offset][display->x_offset];
 
     return g;
 }
@@ -701,7 +705,7 @@ void print_display(Gamestate *g)
                 (void) printf(" ");
 
             // Find pointer to room matching current coordinates:
-            Room *current = g->display->layout[y][x];
+            Room *current = g->display->layout[y + g->display->y_offset][x + g->display->x_offset];
             if (current == NULL)
             {
                 error_code = 1;
@@ -733,7 +737,7 @@ void print_display(Gamestate *g)
         for (int x = 0; x < g->display->width; x++)
         {
             // Find pointer to room matching current coordinates:
-            Room *current = g->display->layout[y][x];
+            Room *current = g->display->layout[y + g->display->y_offset][x + g->display->x_offset];
             if (current == NULL)
             {
                 error_code = 1;
@@ -785,7 +789,7 @@ void print_display(Gamestate *g)
                 for (int hyphen = 0; hyphen < left_hyphens + 1; hyphen++) // + 1 is for the left parenthesis of the room.
                     (void) printf(" ");
                 // Find pointer to room matching current coordinates:
-                Room *current = g->display->layout[y][x];
+                Room *current = g->display->layout[y + g->display->y_offset][x + g->display->x_offset];
                 if (current == NULL)
                 {
                     error_code = 1;
@@ -969,6 +973,14 @@ int parse_command(char *command)
         return 1;
     else if (caseless_strcmp("quit", command) || caseless_strcmp("q", command))
         return 2;
+    else if (caseless_strcmp("north", command) || caseless_strcmp("n", command))
+        return 3;
+    else if (caseless_strcmp("east", command) || caseless_strcmp("e", command))
+        return 4;
+    else if (caseless_strcmp("south", command) || caseless_strcmp("s", command))
+        return 5;
+    else if (caseless_strcmp("west", command) || caseless_strcmp("w", command))
+        return 6;
     else
         return 0;
 }
@@ -1007,10 +1019,10 @@ void print_command_listing(void)
                     "\t(H)elp: prints this listing\n"
                     "\t(Q)uit: returns to main menu\n"
                     "Movement commands:\n"
-                    "\tUp or W: moves the cursor up one space\n"
-                    "\tDown or S: moves the cursor down one space\n"
-                    "\tLeft or A: moves the cursor left one space\n"
-                    "\tRight or D: moves the cursor right one space\n"
+                    "\tNorth or N: moves the cursor up one space\n"
+                    "\tEast or E: moves the cursor right one space\n"
+                    "\tSouth or S: moves the cursor down one space\n"
+                    "\tWest or W: moves the cursor left one space\n"
                     "\nCommands are not case-sensitive.\n");
     gobble_line();
     return;

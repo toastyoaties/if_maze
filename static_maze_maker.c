@@ -59,8 +59,8 @@
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
 #define NUM_CARDINAL_DIRECTIONS 4
-#define MAX_DISPLAY_HEIGHT 22
-#define MAX_DISPLAY_WIDTH 30
+#define MAX_DISPLAY_HEIGHT 20
+#define MAX_DISPLAY_WIDTH 20
 #define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
 #define NUM_LETTERS 26
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
@@ -100,7 +100,6 @@ typedef struct display
     int width;
     int32_t y_offset;
     int32_t x_offset;
-    long long cursor_id;
 } Display;
 
 typedef struct command_c
@@ -113,8 +112,8 @@ typedef struct gamestate
 {
     bool quit;
     Display *display;
-    Room *root;
-    Room *current_focus;
+    Room *current_cursor_focus;
+    Map *current_map;
 } Gamestate;
 
 /* Declarations of External Variables */
@@ -128,11 +127,11 @@ void gobble_line(void);
 Map *create_map(void);
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
-Map *edit_map(Map *editable_map);
+Map *edit_map(Map *editable_map, Gamestate *current_gamestate);
 Room ***create_initial_layout(Map *map_to_display);
 void free_layout(Room ***layout, int32_t height);
 Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t array_width, Room *root);
-Gamestate initialize_gamestate(Display *display, Room *root);
+Gamestate *initialize_gamestate(Display *display, Map *current_map);
 void print_display(Gamestate *g);
 char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
@@ -144,6 +143,7 @@ int parse_command(char *command);
 int caseless_strcmp(char *str1, char *str2);
 void obey_command(int command_code, Gamestate *g);
 void print_command_listing(void);
+void move_cursor(int cardinal_direction, Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -191,8 +191,8 @@ int main(void)
         // Parse user input:
         switch (selection)
         {
-            case 1: free_map(edit_map(create_map())); break;
-            case 2: free_map(edit_map(load_map())); break;
+            case 1: free_map(edit_map(create_map(), NULL)); break;
+            case 2: free_map(edit_map(load_map(), load_gamestate())); break;
             default: goto quit;
         }
         if (error_code) break;
@@ -213,6 +213,7 @@ int main(void)
         case 9: (void) printf("Encountered error. Error code 9: Unable to allocate memory for one or more characters in the command string.\n"); break;
         case 10: (void) printf("Encountered error. Error code 10: Unable to allocate memory for stringified linked list of command characters.\n"); break;
         case 11: (void) printf("Encountered unexpected error. Error code 11: Received unknown command_code; cannot obey.\n"); break;
+        case 12: (void) printf("Encountered unexpected error. Error code 12: Cannot move cursor in unknown direction.\n"); break;
     }
     return error_code;
 }
@@ -261,8 +262,8 @@ Map *create_map(void)
         (void) scanf("%d", &(created_map->height)), gobble_line();
         if (created_map->height < 1)
             (void) printf("Please enter an integer greater than zero.\n");
-        else if (created_map->height > MAX_COORDINATE)
-            (void) printf("Max height is %d.\n", MAX_COORDINATE);
+        else if (created_map->height > MAX_DISPLAY_HEIGHT)
+            (void) printf("Max initial height is %d. More height can be added during editing.\n", MAX_DISPLAY_HEIGHT);
         else
             break;
     }
@@ -275,8 +276,8 @@ Map *create_map(void)
         (void) scanf("%d", &(created_map->width)), gobble_line();
         if (created_map->width < 1)
             (void) printf("Please enter an integer greater than zero.\n");
-        else if (created_map->width > MAX_COORDINATE)
-            (void) printf("Max width is %d.\n", MAX_COORDINATE);
+        else if (created_map->width > MAX_DISPLAY_WIDTH)
+            (void) printf("Max initial width is %d. More width can be added during editing.\n", MAX_DISPLAY_WIDTH);
         else
             break;
     }
@@ -306,7 +307,6 @@ Map *create_map(void)
             printf("next_id: %lld\n", next_id);
         }
     }
-//TODO: WHY DOES x,y = 1000 cause infinite loop above? Fix this bug.
     return created_map;
 }
 
@@ -369,47 +369,68 @@ Map *load_map(void)
  *                            - Reads from stdin.                                           *
  *                            - Modifies any and all data associated with passed map.       *
  ********************************************************************************************/
-Map *edit_map(Map *editable_map)
+Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
 {
     if (error_code) return editable_map;
 
-    // Create layout, display, and gamestate:
-    Room ***layout = create_initial_layout(editable_map);
-    if (error_code)
+    Room ***layout;
+    Display *display;
+    Gamestate *gamestate;
+
+    //Initialize the above three declared variables:
+    if (current_gamestate == NULL) // If starting a new map, not loading one:
     {
-        free_layout(layout, editable_map->height);
-        return editable_map;
-    }
+        // Create layout, display, and gamestate:
+        layout = create_initial_layout(editable_map);
+        if (error_code)
+        {
+            free_layout(layout, editable_map->height);
+            return editable_map;
+        }
 
-    Display *display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
-    if (error_code)
-    {
-        free_layout(layout, editable_map->height);
-        return editable_map;
-    }
+        display = initialize_display(layout, editable_map->height, editable_map->width, editable_map->root);
+        if (error_code)
+        {
+            free_layout(layout, editable_map->height);
+            return editable_map;
+        }
 
-    Gamestate gamestate = initialize_gamestate(display, editable_map->root);
-
-    // Interaction Loop:
-    for (;!gamestate.quit;)
-    {
-        CLEAR_CONSOLE;
-
-        // Print display:
-        print_display(&gamestate);
+        gamestate = initialize_gamestate(display, editable_map);
         if (error_code)
         {
             free_layout(layout, editable_map->height);
             free(display);
+        }
+    }
+    else // If continuing a loaded file:
+    {
+        layout = current_gamestate->display->layout;
+        display = current_gamestate->display;
+        gamestate = current_gamestate;
+    }
+
+    // Interaction Loop:
+    for (;!gamestate->quit;)
+    {
+        CLEAR_CONSOLE;
+
+        // Print display:
+        print_display(gamestate);
+        if (error_code)
+        {
+            free_layout(layout, editable_map->height);
+            free(display);
+            free(gamestate);
             return editable_map;
         }
 
         #ifdef FORCE_BUFFERED_MODE
-            obey_command(get_command("Enter command:\n>"), &gamestate);
+            obey_command(get_command("Enter command:\n>"), gamestate);
             if (error_code)
             {
                 free_layout(layout, editable_map->height);
                 free(display);
+                free(gamestate);
                 return editable_map;
             }
         #endif
@@ -464,6 +485,7 @@ Map *edit_map(Map *editable_map)
     //TODO: Warns when about to return without saving
     free_layout(layout, editable_map->height);
     free(display);
+    free(gamestate);
     return editable_map;
 }
 
@@ -560,28 +582,6 @@ Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t 
     d->width = array_width > MAX_DISPLAY_WIDTH ? MAX_DISPLAY_WIDTH : array_width;
     d->y_offset = 0, d->x_offset = 0;
 
-    // Set d->cursor_id to the first extant room in the layout array (will always be at (0,0) in a fresh map):
-    for (int y = 0; y < d->height; y++)
-    {
-        for (int x = 0; x < d->width; x++)
-        {
-            for (Room *current_room = root; current_room->next_room != NULL; current_room = current_room->next_room)
-            {
-                if (current_room->id == d->layout[y][x]->id)
-                {
-                    if (current_room->exists)
-                    {
-                        d->cursor_id = current_room->id;
-                        goto full_breakout;
-                    }
-                    else
-                        break;
-                }
-            }
-        }
-    }
-    full_breakout:
-
     return d;
 }
 
@@ -592,14 +592,19 @@ Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t 
  *                      Side effects (such as modifying external variables,              *
  *                          printing to stdout, or exiting the program):                 *
  *****************************************************************************************/
-Gamestate initialize_gamestate(Display *display, Room *root)
+Gamestate *initialize_gamestate(Display *display, Map *current_map)
 {
-    Gamestate g;
+    Gamestate *g = malloc(sizeof(Gamestate));
+    if (g == NULL)
+    {
+        error_code = 13;
+        return NULL;
+    }
 
-    g.quit = false;
-    g.display = display;
-    g.root = root;
-    g.current_focus = display->layout[display->y_offset][display->x_offset];
+    g->quit = false;
+    g->display = display;
+    g->current_map = current_map;
+    g->current_cursor_focus = display->layout[0][0];
 
     return g;
 }
@@ -621,7 +626,6 @@ void print_display(Gamestate *g)
     //     int width;
     //     int32_t y_offset;
     //     int32_t x_offset;
-    //     long long cursor_id;
     // } Display;
 
     // Find max screen length of y-coordinates to display, for formatting purposes:
@@ -756,7 +760,7 @@ void print_display(Gamestate *g)
                 (void) printf("(");
             else
                 (void) printf(" ");
-            if (current->id == g->display->cursor_id)
+            if (current == g->current_cursor_focus)
                 (void) printf("*");
             else
                 (void) printf(" ");
@@ -1008,6 +1012,10 @@ void obey_command(int command_code, Gamestate *g)
         case -1: /* Pass */ break;
         case 1: print_command_listing(); break;
         case 2: g->quit = true; break;
+        case 3: move_cursor(NORTH, g); break;
+        case 4: move_cursor(EAST, g); break;
+        case 5: move_cursor(SOUTH, g); break;
+        case 6: move_cursor(WEST, g); break;
     }
 }
 
@@ -1026,6 +1034,76 @@ void print_command_listing(void)
                     "\nCommands are not case-sensitive.\n");
     gobble_line();
     return;
+}
+
+void move_cursor(int cardinal_direction, Gamestate *g)
+{
+    //TODO: Adjust gamestate focus variable
+    //TODO: Adjust display offset based on cardinal_direction
+
+    int yesno = '\0';
+
+    //Check if moving cursor would place if off the current layout:
+    if (cardinal_direction == NORTH && g->current_cursor_focus->y_coordinate == 0) // NORTH LAYOUT EDGE
+    {
+        #ifdef FORCE_BUFFERED_MODE
+            do
+            {
+                (void) printf("There is no row of rooms to the north. Would you like to shift the coordinate system and create a new row? (y/n) ");
+                yesno = tolower(getchar()), gobble_line();
+            } while (yesno != 'y' && yesno != 'n');
+        #endif
+        #ifdef UNIX
+            //TODO
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
+
+        if (yesno == 'y')
+            add_row_above(g); //This function needs to create a new map, port over the old map inserting new rooms along the way, free old map, dupe new map over, build a new layout, free old layout, and dupe over new layout.
+                                //also, check against MAX_COORDINATE
+    }
+    else if (cardinal_direction == EAST && g->current_cursor_focus->x_coordinate == (g->current_map->width - 1)) // EAST LAYOUT EDGE
+    {
+    }
+    else if (cardinal_direction = SOUTH && g->current_cursor_focus->y_coordinate == (g->current_map->height - 1)) // SOUTH LAYOUT EDGE
+    {
+    }
+    else if (cardinal_direction = WEST && g->current_cursor_focus->x_coordinate == 0) // WEST LAYOUT EDGE
+    {
+    }
+    //Check if moving cursor would place it off the current display:
+    else if (cardinal_direction == NORTH && g->current_cursor_focus->y_coordinate == g->display->y_offset) // NORTH DISPLAY EDGE
+    {
+    }
+    else if (cardinal_direction == EAST && g->current_cursor_focus->x_coordinate == g->display->x_offset + (g->display->width - 1)) // EAST DISPLAY EDGE
+    {
+    }
+    else if (cardinal_direction == SOUTH && g->current_cursor_focus->y_coordinate == g->display->y_offset + (g->display->height - 1)) // SOUTH DISPLAY EDGE
+    {
+    }
+    else if (cardinal_direction == WEST && g->current_cursor_focus->x_coordinate == g->display->x_offset) // WEST DISPLAY EDGE
+    {
+    }
+    else
+    {
+        switch (cardinal_direction)
+        {
+            default: error_code = 12; break;
+            case NORTH:
+                g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate]; break;
+            case EAST:
+                g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1]; break;
+            case SOUTH:
+                g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate]; break;
+            case WEST:
+                g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1]; break;
+        }
+    }
+
+
+
 }
 
 /*******************************************************************************************

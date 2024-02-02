@@ -1,4 +1,34 @@
 /****************************************************************************************************
+ * Current goal: Fix segfault that occurs when adding new row/column during movement.               *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ *                                                                                                  *
+ ****************************************************************************************************/
+
+
+
+
+
+
+
+
+
+
+
+
+
+/****************************************************************************************************
  * Name: static_maze_maker.c                                                                        *
  * File creation date: 2023-11-1                                                                    *
  * 1.0 date:                                                                                        *
@@ -86,6 +116,12 @@ typedef struct room
     struct room *next_room;
 } Room;
 
+typedef struct dimensions
+{
+    int32_t height;
+    int32_t width;
+} Dimensions;
+
 typedef struct map
 {
     int32_t height;
@@ -124,9 +160,11 @@ int error_code = 0;
 
 /* Prototypes for non-main functions */
 void gobble_line(void);
-Map *create_map(void);
+Dimensions prompt_for_dimensions(void);
+Map *create_map(Dimensions dim);
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
 Map *load_map(void);
+Gamestate *load_gamestate(void);
 Map *edit_map(Map *editable_map, Gamestate *current_gamestate);
 Room ***create_initial_layout(Map *map_to_display);
 void free_layout(Room ***layout, int32_t height);
@@ -144,6 +182,10 @@ int caseless_strcmp(char *str1, char *str2);
 void obey_command(int command_code, Gamestate *g);
 void print_command_listing(void);
 void move_cursor(int cardinal_direction, Gamestate *g);
+void add_row_north(Gamestate *g);
+void add_column_east(Gamestate *g);
+void add_row_south(Gamestate *g);
+void add_column_west(Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -191,7 +233,7 @@ int main(void)
         // Parse user input:
         switch (selection)
         {
-            case 1: free_map(edit_map(create_map(), NULL)); break;
+            case 1: free_map(edit_map(create_map(prompt_for_dimensions()), NULL)); break;
             case 2: free_map(edit_map(load_map(), load_gamestate())); break;
             default: goto quit;
         }
@@ -214,6 +256,7 @@ int main(void)
         case 10: (void) printf("Encountered error. Error code 10: Unable to allocate memory for stringified linked list of command characters.\n"); break;
         case 11: (void) printf("Encountered unexpected error. Error code 11: Received unknown command_code; cannot obey.\n"); break;
         case 12: (void) printf("Encountered unexpected error. Error code 12: Cannot move cursor in unknown direction.\n"); break;
+        case 13: (void) printf("Encountered error. Error code 13: Unable to allocate memory for gamestate.\n"); break;
     }
     return error_code;
 }
@@ -232,6 +275,44 @@ void gobble_line(void)
     return;
 }
 
+Dimensions prompt_for_dimensions(void)
+{
+    CLEAR_CONSOLE;
+    (void) printf("Creating blank map...\n");
+
+    Dimensions dim;
+    dim.height = 0;
+    dim.width = 0;
+
+    // Prompt for initial height:
+    for (;;)
+    {
+        (void) printf("Enter desired initial height of map: ");
+        (void) scanf("%d", &(dim.height)), gobble_line();
+        if (dim.height < 1)
+            (void) printf("Please enter an integer greater than zero.\n");
+        else if (dim.height > MAX_DISPLAY_HEIGHT)
+            (void) printf("Max initial height is %d. More height can be added during editing.\n", MAX_DISPLAY_HEIGHT);
+        else
+            break;
+    }
+
+    // Prompt for initial width:
+    for (;;)
+    {
+        (void) printf("Enter desired initial width of map: ");
+        (void) scanf("%d", &(dim.width)), gobble_line();
+        if (dim.width < 1)
+            (void) printf("Please enter an integer greater than zero.\n");
+        else if (dim.width > MAX_DISPLAY_WIDTH)
+            (void) printf("Max initial width is %d. More width can be added during editing.\n", MAX_DISPLAY_WIDTH);
+        else
+            break;
+    }
+
+    return dim;
+}
+
 /*****************************************************************************************
  * create_map:    Purpose: Creates blank map for further editing.                        *
  *                Parameters: none                                                       *
@@ -242,11 +323,9 @@ void gobble_line(void)
  *                              - Allocates memory.                                      *
  *                              - Edits global variable "error_code"                     *
  *****************************************************************************************/
-Map *create_map(void)
+Map *create_map(Dimensions dim)
 {
     // Allocate memory for map:
-    CLEAR_CONSOLE;
-    (void) printf("Creating blank map...\n");
     Map *created_map = malloc(sizeof(Map));
     if (created_map == NULL)
     {
@@ -254,33 +333,8 @@ Map *create_map(void)
         return NULL;
     }
 
-    // Prompt for initial height:
-    created_map->height = 0;
-    for (;;)
-    {
-        (void) printf("Enter desired initial height of map: ");
-        (void) scanf("%d", &(created_map->height)), gobble_line();
-        if (created_map->height < 1)
-            (void) printf("Please enter an integer greater than zero.\n");
-        else if (created_map->height > MAX_DISPLAY_HEIGHT)
-            (void) printf("Max initial height is %d. More height can be added during editing.\n", MAX_DISPLAY_HEIGHT);
-        else
-            break;
-    }
-
-    // Prompt for initial width:
-    created_map->width = 0;
-    for (;;)
-    {
-        (void) printf("Enter desired initial width of map: ");
-        (void) scanf("%d", &(created_map->width)), gobble_line();
-        if (created_map->width < 1)
-            (void) printf("Please enter an integer greater than zero.\n");
-        else if (created_map->width > MAX_DISPLAY_WIDTH)
-            (void) printf("Max initial width is %d. More width can be added during editing.\n", MAX_DISPLAY_WIDTH);
-        else
-            break;
-    }
+    created_map->height = dim.height;
+    created_map->width = dim.width;
 
     // Initialize linked list of rooms, starting from (0,0):
     created_map->root = NULL;
@@ -304,7 +358,6 @@ Map *create_map(void)
                 }
                 attach_point->next_room = r;
             }
-            printf("next_id: %lld\n", next_id);
         }
     }
     return created_map;
@@ -355,6 +408,14 @@ Map *load_map(void)
     //  ...as part of the function, perform validation on the map file (for example, that it hasn't been edited so as to expand past MAX_COORDINATE, etc)
     Map *loaded_map = NULL;
     return loaded_map;
+}
+
+Gamestate *load_gamestate(void)
+{
+    //TODO
+    // as part of the function, perform validation on the gameplay file (if that makes sense when the time comes)
+    Gamestate *loaded_gamestate = NULL;
+    return loaded_gamestate;
 }
 
 /********************************************************************************************
@@ -1061,32 +1122,111 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         #endif
 
         if (yesno == 'y')
-            add_row_above(g); //This function needs to create a new map, port over the old map inserting new rooms along the way, free old map, dupe new map over, build a new layout, free old layout, and dupe over new layout.
-                                //also, check against MAX_COORDINATE
+        {
+            add_row_north(g);
+            // Move the display:
+            g->display->y_offset--;
+        }
     }
     else if (cardinal_direction == EAST && g->current_cursor_focus->x_coordinate == (g->current_map->width - 1)) // EAST LAYOUT EDGE
     {
+        #ifdef FORCE_BUFFERED_MODE
+            do
+            {
+                (void) printf("There is no column of rooms to the east. Would you like to create a new column? (y/n) ");
+                yesno = tolower(getchar()), gobble_line();
+            } while (yesno != 'y' && yesno != 'n');
+        #endif
+        #ifdef UNIX
+            //TODO
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
+
+        if (yesno == 'y')
+        {
+            add_column_east(g);
+            // Move the display:
+            g->display->x_offset++;
+        }
     }
-    else if (cardinal_direction = SOUTH && g->current_cursor_focus->y_coordinate == (g->current_map->height - 1)) // SOUTH LAYOUT EDGE
+    else if (cardinal_direction == SOUTH && g->current_cursor_focus->y_coordinate == (g->current_map->height - 1)) // SOUTH LAYOUT EDGE
     {
+        #ifdef FORCE_BUFFERED_MODE
+            do
+            {
+                (void) printf("There is no row of rooms to the south. Would you like to create a new row? (y/n) ");
+                yesno = tolower(getchar()), gobble_line();
+            } while (yesno != 'y' && yesno != 'n');
+        #endif
+        #ifdef UNIX
+            //TODO
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
+
+        if (yesno == 'y')
+        {
+            add_row_south(g);
+            // Move the display:
+            g->display->y_offset++;
+        }
     }
-    else if (cardinal_direction = WEST && g->current_cursor_focus->x_coordinate == 0) // WEST LAYOUT EDGE
+    else if (cardinal_direction == WEST && g->current_cursor_focus->x_coordinate == 0) // WEST LAYOUT EDGE
     {
+        #ifdef FORCE_BUFFERED_MODE
+            do
+            {
+                (void) printf("There is no column of rooms to the west. Would you like to shift the coordinate system and create a new column? (y/n) ");
+                yesno = tolower(getchar()), gobble_line();
+            } while (yesno != 'y' && yesno != 'n');
+        #endif
+        #ifdef UNIX
+            //TODO
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
+
+        if (yesno == 'y')
+        {
+            add_column_west(g);
+            // Move the display:
+            g->display->x_offset--;
+        }
     }
     //Check if moving cursor would place it off the current display:
     else if (cardinal_direction == NORTH && g->current_cursor_focus->y_coordinate == g->display->y_offset) // NORTH DISPLAY EDGE
     {
+        // Move the display:
+        g->display->y_offset--;
+        // Move the cursor:
+        g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate];
     }
     else if (cardinal_direction == EAST && g->current_cursor_focus->x_coordinate == g->display->x_offset + (g->display->width - 1)) // EAST DISPLAY EDGE
     {
+        // Move the display:
+        g->display->x_offset++;
+        // Move the cursor:
+        g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1];
     }
     else if (cardinal_direction == SOUTH && g->current_cursor_focus->y_coordinate == g->display->y_offset + (g->display->height - 1)) // SOUTH DISPLAY EDGE
     {
+        // Move the display:
+        g->display->y_offset++;
+        // Move the cursor:
+        g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate];
     }
     else if (cardinal_direction == WEST && g->current_cursor_focus->x_coordinate == g->display->x_offset) // WEST DISPLAY EDGE
     {
+        // Move the display:
+        g->display->x_offset--;
+        // Move the cursor:
+        g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1];
     }
-    else
+    else // No need to adjust layout or display; just move the cursor:
     {
         switch (cardinal_direction)
         {
@@ -1102,8 +1242,191 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         }
     }
 
+    return;
+}
 
+void add_row_north(Gamestate *g)
+{
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height + 1;
+    new_map_dim.width = g->current_map->width;
 
+    if (new_map_dim.height > MAX_COORDINATE)
+    {
+        (void) printf("Unable to comply: Adding new row would exceed maximum possible map size.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row + 1][column]->exists = g->display->layout[row][column]->exists;
+            new_layout[row + 1][column]->id_alias = g->display->layout[row][column]->id_alias;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row + 1][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+
+    return;
+}
+
+void add_column_east(Gamestate *g)
+{
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height;
+    new_map_dim.width = g->current_map->width + 1;
+
+    if (new_map_dim.width > MAX_COORDINATE)
+    {
+        (void) printf("Unable to comply: Adding new column would exceed maximum possible map size.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row][column]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+
+    return;
+}
+
+void add_row_south(Gamestate *g)
+{
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height + 1;
+    new_map_dim.width = g->current_map->width;
+
+    if (new_map_dim.height > MAX_COORDINATE)
+    {
+        (void) printf("Unable to comply: Adding new row would exceed maximum possible map size.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row][column]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+
+    return;
+}
+
+void add_column_west(Gamestate *g)
+{
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height;
+    new_map_dim.width = g->current_map->width + 1;
+
+    if (new_map_dim.width > MAX_COORDINATE)
+    {
+        (void) printf("Unable to comply: Adding new column would exceed maximum possible map size.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row][column + 1]->exists = g->display->layout[row][column]->exists;
+            new_layout[row][column + 1]->id_alias = g->display->layout[row][column]->id_alias;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column + 1]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+
+    return;
 }
 
 /*******************************************************************************************
@@ -1160,3 +1483,7 @@ void free_rooms(Room *r)
 // - Make height/width of editor a variable based on internal reading of terminal window size (including if user re-sizes terminal midway through execution).
 // - Add ability to turn off and back on the axis labels.
 // - Add ability to declare the edge of the map and make rooms connect to the beginning of a different map on the same level, to make it more feasable to build large spaces by dividing them into separate chunks each on their own map.
+// - Get rid of Room ids? Haven't seemed to use them thus far (2024-2-2). ID_alias would need to be renamed to just "label", or similar.
+// - Combine the four add row/column functions into one, to reduce duplicate code.
+// - Drastically reduce MAX_COORDINATE's size. No human would ever need a map that generous, and were one to be used, certain functions--like adding new rows/columns--would take a prohibitively long time (meaning DAYS of real time to create a duplicate map, for example).
+// - Add option to switch between nesw controls and wasd controls.

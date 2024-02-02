@@ -1,5 +1,6 @@
 /****************************************************************************************************
- * Current goal: Fix segfault that occurs when adding new row/column during movement.               *
+ * Current goal: Fix segfault that occurs due to trying to free unallocated memory                  *
+ *                  (ie, fix mem leaks/problems).                                                   *
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -1124,8 +1125,6 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         if (yesno == 'y')
         {
             add_row_north(g);
-            // Move the display:
-            g->display->y_offset--;
         }
     }
     else if (cardinal_direction == EAST && g->current_cursor_focus->x_coordinate == (g->current_map->width - 1)) // EAST LAYOUT EDGE
@@ -1193,8 +1192,6 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         if (yesno == 'y')
         {
             add_column_west(g);
-            // Move the display:
-            g->display->x_offset--;
         }
     }
     //Check if moving cursor would place it off the current display:
@@ -1247,6 +1244,10 @@ void move_cursor(int cardinal_direction, Gamestate *g)
 
 void add_row_north(Gamestate *g)
 {
+    // Store cursor position:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
     Dimensions new_map_dim;
     new_map_dim.height = g->current_map->height + 1;
     new_map_dim.width = g->current_map->width;
@@ -1287,12 +1288,17 @@ void add_row_north(Gamestate *g)
     free_map(g->current_map);
     g->display->layout = new_layout;
     g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y + 1][cursor_x];
 
     return;
 }
 
 void add_column_east(Gamestate *g)
 {
+    // Store cursor position:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
     Dimensions new_map_dim;
     new_map_dim.height = g->current_map->height;
     new_map_dim.width = g->current_map->width + 1;
@@ -1333,12 +1339,17 @@ void add_column_east(Gamestate *g)
     free_map(g->current_map);
     g->display->layout = new_layout;
     g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
     return;
 }
 
 void add_row_south(Gamestate *g)
 {
+    // Store cursor position:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
     Dimensions new_map_dim;
     new_map_dim.height = g->current_map->height + 1;
     new_map_dim.width = g->current_map->width;
@@ -1379,12 +1390,17 @@ void add_row_south(Gamestate *g)
     free_map(g->current_map);
     g->display->layout = new_layout;
     g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
     return;
 }
 
 void add_column_west(Gamestate *g)
 {
+    // Store cursor position:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
     Dimensions new_map_dim;
     new_map_dim.height = g->current_map->height;
     new_map_dim.width = g->current_map->width + 1;
@@ -1425,6 +1441,7 @@ void add_column_west(Gamestate *g)
     free_map(g->current_map);
     g->display->layout = new_layout;
     g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x + 1];
 
     return;
 }

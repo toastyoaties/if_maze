@@ -407,6 +407,7 @@ Map *load_map(void)
 {
     //TODO
     //  ...as part of the function, perform validation on the map file (for example, that it hasn't been edited so as to expand past MAX_COORDINATE, etc)
+    // This function will need to run malloc for maps & rooms, or use the constructor subroutines and then re-assign properties from the loaded file to the malloc'd variables.
     Map *loaded_map = NULL;
     return loaded_map;
 }
@@ -415,6 +416,7 @@ Gamestate *load_gamestate(void)
 {
     //TODO
     // as part of the function, perform validation on the gameplay file (if that makes sense when the time comes)
+    // This function will need to run malloc for display & layout & gamestate, or use the constructor subroutines and then re-assign properties from the loaded file to the malloc'd variables.
     Gamestate *loaded_gamestate = NULL;
     return loaded_gamestate;
 }
@@ -435,13 +437,15 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
 {
     if (error_code) return editable_map;
 
-    Room ***layout;
-    Display *display;
     Gamestate *gamestate;
 
     //Initialize the above three declared variables:
     if (current_gamestate == NULL) // If starting a new map, not loading one:
     {
+        // Temp variables used for initialization purposes only:
+        Room ***layout;
+        Display *display;
+
         // Create layout, display, and gamestate:
         layout = create_initial_layout(editable_map);
         if (error_code)
@@ -463,11 +467,18 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
             free_layout(layout, editable_map->height);
             free(display);
         }
+        // Now that gamestate has been created & initialized, the layout/display/editable_map variables will no longer be used.
+        // For memory-management reasons, all access to displays/layouts/maps will be accomplished only via the gamestate structure.
+        // Otherwise, when new layouts/maps are created/destroyed during the course of subroutines, these old variables will still contain the
+        // *old* pointer addresses rather than the various newly-created/updated ones. Free()-ing is much easier if I can free everything via
+        // the gamestate variable instead. (The map is a special case, as the structure of the main menu requires the map to be passed to a
+        // free()-ing subroutine *after* this edit_map subroutine returns, so I will simply re-assign the editable_map variable to the newest
+        // map via gamestate just before freeing gamestate and returning editable_map. This weirdness is simply a consequence of my never having
+        // built a program this complex before; in future programs with similar goals, I will likely try to center all the structure around a
+        // gamestate from the very start, instead of centering around, say, a map, as here.)
     }
     else // If continuing a loaded file:
     {
-        layout = current_gamestate->display->layout;
-        display = current_gamestate->display;
         gamestate = current_gamestate;
     }
 
@@ -480,8 +491,9 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
         print_display(gamestate);
         if (error_code)
         {
-            free_layout(layout, editable_map->height);
-            free(display);
+            free_layout(gamestate->display->layout, gamestate->current_map->height);
+            free(gamestate->display);
+            editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
             free(gamestate);
             return editable_map;
         }
@@ -490,8 +502,9 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
             obey_command(get_command("Enter command:\n>"), gamestate);
             if (error_code)
             {
-                free_layout(layout, editable_map->height);
-                free(display);
+                free_layout(gamestate->display->layout, gamestate->current_map->height);
+                free(gamestate->display);
+                editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
                 free(gamestate);
                 return editable_map;
             }
@@ -545,8 +558,9 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
 
     //TODO: Allow saving map before returning (returning leads to freeing--aka losing--map from memory)
     //TODO: Warns when about to return without saving
-    free_layout(layout, editable_map->height);
-    free(display);
+    free_layout(gamestate->display->layout, gamestate->current_map->height);
+    free(gamestate->display);
+    editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
     free(gamestate);
     return editable_map;
 }

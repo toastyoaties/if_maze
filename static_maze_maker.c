@@ -1,6 +1,5 @@
 /****************************************************************************************************
- * Current goal: Fix segfault that occurs due to trying to free unallocated memory                  *
- *                  (ie, fix mem leaks/problems).                                                   *
+ * Current goal: More user commands.                                                   *
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *

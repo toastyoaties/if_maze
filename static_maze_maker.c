@@ -1523,6 +1523,8 @@ void toggle_movement(Gamestate *g)
 {
     if (g->user_settings->movement_mode == NESW)
         g->user_settings->movement_mode = WASD;
+    else
+        g->user_settings->movement_mode = NESW;
     return;
 }
 

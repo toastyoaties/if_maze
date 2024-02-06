@@ -105,6 +105,12 @@ enum cardinal_directions
     WEST,
 };
 
+enum movement_mode
+{
+    NESW,
+    WASD,
+};
+
 typedef struct room
 {
     long long id;
@@ -144,12 +150,18 @@ typedef struct command_c
     struct command_c *next_c;
 } Command_C;
 
+typedef struct settings
+{
+    int movement_mode;
+} Settings;
+
 typedef struct gamestate
 {
     bool quit;
     Display *display;
     Room *current_cursor_focus;
     Map *current_map;
+    Settings *user_settings;
 } Gamestate;
 
 /* Declarations of External Variables */
@@ -169,23 +181,25 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate);
 Room ***create_initial_layout(Map *map_to_display);
 void free_layout(Room ***layout, int32_t height);
 Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t array_width, Room *root);
-Gamestate *initialize_gamestate(Display *display, Map *current_map);
+Settings *initialize_settings(void);
+Gamestate *initialize_gamestate(Display *display, Map *current_map, Settings *defaults);
 void print_display(Gamestate *g);
 char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
 int32_t lower_boundary(int base, int power);
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
-int get_command(char *prompt);
+int get_command(char *prompt, Gamestate *g);
 void free_command(Command_C *root);
-int parse_command(char *command);
+int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
 void obey_command(int command_code, Gamestate *g);
-void print_command_listing(void);
+void print_command_listing(Gamestate *g);
 void move_cursor(int cardinal_direction, Gamestate *g);
 void add_row_north(Gamestate *g);
 void add_column_east(Gamestate *g);
 void add_row_south(Gamestate *g);
 void add_column_west(Gamestate *g);
+void toggle_movement(Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -257,6 +271,7 @@ int main(void)
         case 11: (void) printf("Encountered unexpected error. Error code 11: Received unknown command_code; cannot obey.\n"); break;
         case 12: (void) printf("Encountered unexpected error. Error code 12: Cannot move cursor in unknown direction.\n"); break;
         case 13: (void) printf("Encountered error. Error code 13: Unable to allocate memory for gamestate.\n"); break;
+        case 14: (void) printf("Encountered error. Error code 14: Unable to allocate memory for settings.\n"); break;
     }
     return error_code;
 }
@@ -444,6 +459,7 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
         // Temp variables used for initialization purposes only:
         Room ***layout;
         Display *display;
+        Settings *settings;
 
         // Create layout, display, and gamestate:
         layout = create_initial_layout(editable_map);
@@ -460,11 +476,19 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
             return editable_map;
         }
 
-        gamestate = initialize_gamestate(display, editable_map);
+        settings = initialize_settings();
         if (error_code)
         {
             free_layout(layout, editable_map->height);
             free(display);
+        }
+
+        gamestate = initialize_gamestate(display, editable_map, settings);
+        if (error_code)
+        {
+            free_layout(layout, editable_map->height);
+            free(display);
+            free(settings);
         }
         // Now that gamestate has been created & initialized, the layout/display/editable_map variables will no longer be used.
         // For memory-management reasons, all access to displays/layouts/maps will be accomplished only via the gamestate structure.
@@ -492,17 +516,19 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
         {
             free_layout(gamestate->display->layout, gamestate->current_map->height);
             free(gamestate->display);
+            free(gamestate->user_settings);
             editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
             free(gamestate);
             return editable_map;
         }
 
         #ifdef FORCE_BUFFERED_MODE
-            obey_command(get_command("Enter command:\n>"), gamestate);
+            obey_command(get_command("Enter command:\n>", gamestate), gamestate);
             if (error_code)
             {
                 free_layout(gamestate->display->layout, gamestate->current_map->height);
                 free(gamestate->display);
+                free(gamestate->user_settings);
                 editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
                 free(gamestate);
                 return editable_map;
@@ -559,6 +585,7 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
     //TODO: Warns when about to return without saving
     free_layout(gamestate->display->layout, gamestate->current_map->height);
     free(gamestate->display);
+    free(gamestate->user_settings);
     editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
     free(gamestate);
     return editable_map;
@@ -660,6 +687,20 @@ Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t 
     return d;
 }
 
+Settings *initialize_settings(void)
+{
+    Settings *s = malloc(sizeof(Settings));
+    if (s == NULL)
+    {
+        error_code = 14;
+        return NULL;
+    }
+
+    s->movement_mode = NESW;
+
+    return s;
+}
+
 /*****************************************************************************************
  * name_of_function:    Purpose:                                                         *
  *                      Parameters (and the meaning of each):                            *
@@ -667,7 +708,7 @@ Display *initialize_display(Room ***layout_array, int32_t array_height, int32_t 
  *                      Side effects (such as modifying external variables,              *
  *                          printing to stdout, or exiting the program):                 *
  *****************************************************************************************/
-Gamestate *initialize_gamestate(Display *display, Map *current_map)
+Gamestate *initialize_gamestate(Display *display, Map *current_map, Settings *defaults)
 {
     Gamestate *g = malloc(sizeof(Gamestate));
     if (g == NULL)
@@ -680,6 +721,7 @@ Gamestate *initialize_gamestate(Display *display, Map *current_map)
     g->display = display;
     g->current_map = current_map;
     g->current_cursor_focus = display->layout[0][0];
+    g->user_settings = defaults;
 
     return g;
 }
@@ -982,7 +1024,7 @@ int calculate_letter_index(int32_t current_number, int current_digit, int32_t lo
  *                      Side effects (such as modifying external variables,              *
  *                          printing to stdout, or exiting the program): - Modifies global variable "error_code"                *
  *****************************************************************************************/
-int get_command(char *prompt)
+int get_command(char *prompt, Gamestate *g)
 {
     Command_C *root_c = NULL;
     int character = 0;
@@ -1031,7 +1073,7 @@ int get_command(char *prompt)
     command[character_count] = '\0';
     free_command(root_c);
 
-    int command_code = parse_command(command);
+    int command_code = parse_command(command, g);
     free(command);
 
     return command_code;
@@ -1046,20 +1088,22 @@ void free_command(Command_C *root)
     return;
 }
 
-int parse_command(char *command)
+int parse_command(char *command, Gamestate *g)
 {
     if (caseless_strcmp("help", command) || caseless_strcmp("h", command))
         return 1;
     else if (caseless_strcmp("quit", command) || caseless_strcmp("q", command))
         return 2;
-    else if (caseless_strcmp("north", command) || caseless_strcmp("n", command))
+    else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("north", command) || caseless_strcmp("n", command) : caseless_strcmp("up", command) || caseless_strcmp("w", command))
         return 3;
-    else if (caseless_strcmp("east", command) || caseless_strcmp("e", command))
+    else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("east", command) || caseless_strcmp("e", command) : caseless_strcmp("right", command) || caseless_strcmp("d", command))
         return 4;
-    else if (caseless_strcmp("south", command) || caseless_strcmp("s", command))
+    else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("south", command) || caseless_strcmp("s", command) : caseless_strcmp("down", command) || caseless_strcmp("s", command))
         return 5;
-    else if (caseless_strcmp("west", command) || caseless_strcmp("w", command))
+    else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("west", command) || caseless_strcmp("w", command) : caseless_strcmp("left", command) || caseless_strcmp("a", command))
         return 6;
+    else if (caseless_strcmp("toggle movement", command))
+        return 7;
     else
         return 0;
 }
@@ -1085,28 +1129,44 @@ void obey_command(int command_code, Gamestate *g)
         default: error_code = 11; break;
         case 0: (void) printf("Unknown command. Type 'help' or 'h' for help.\n"), gobble_line(); break;
         case -1: /* Pass */ break;
-        case 1: print_command_listing(); break;
+        case 1: print_command_listing(g); break;
         case 2: g->quit = true; break;
         case 3: move_cursor(NORTH, g); break;
         case 4: move_cursor(EAST, g); break;
         case 5: move_cursor(SOUTH, g); break;
         case 6: move_cursor(WEST, g); break;
+        case 7: toggle_movement(g); break;
     }
 }
 
-void print_command_listing(void)
+void print_command_listing(Gamestate *g)
 {
     CLEAR_CONSOLE;
     (void) printf("----Valid Commands----\n"
                     "Function commands:\n"
                     "\t(H)elp: prints this listing\n"
-                    "\t(Q)uit: returns to main menu\n"
-                    "Movement commands:\n"
-                    "\tNorth or N: moves the cursor up one space\n"
-                    "\tEast or E: moves the cursor right one space\n"
-                    "\tSouth or S: moves the cursor down one space\n"
-                    "\tWest or W: moves the cursor left one space\n"
-                    "\nCommands are not case-sensitive.\n");
+                    "\t(Q)uit: returns to main menu\n");
+    if (g->user_settings->movement_mode == NESW)
+    {
+        (void) printf(
+                        "Movement commands:\n"
+                        "\t(N)orth: moves the cursor up one space\n"
+                        "\t(E)ast: moves the cursor right one space\n"
+                        "\t(S)outh: moves the cursor down one space\n"
+                        "\t(W)est: moves the cursor left one space\n"
+                        "\tToggle Movement: re-maps movement commands to WASD\n");
+    }
+    else
+    {
+        (void) printf(
+                        "Movement commands:\n"
+                        "\tUp (W): moves the cursor up one space\n"
+                        "\tLeft (A): moves the cursor left one space\n"
+                        "\tDown (S): moves the cursor down one space\n"
+                        "\tRight (D): moves the cursor right one space\n"
+                        "\tToggle Movement: re-maps movement commands to NESW\n");
+    }
+    (void) printf("\nCommands are not case-sensitive.\n");
     gobble_line();
     return;
 }
@@ -1456,6 +1516,13 @@ void add_column_west(Gamestate *g)
     g->current_map = new_map;
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x + 1];
 
+    return;
+}
+
+void toggle_movement(Gamestate *g)
+{
+    if (g->user_settings->movement_mode == NESW)
+        g->user_settings->movement_mode = WASD;
     return;
 }
 

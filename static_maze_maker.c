@@ -120,6 +120,7 @@ typedef struct room
     bool exists;
     bool exits[4];
     struct room *next_room;
+    char mark;
 } Room;
 
 typedef struct dimensions
@@ -162,6 +163,8 @@ typedef struct gamestate
     Room *current_cursor_focus;
     Map *current_map;
     Settings *user_settings;
+    Room *start;
+    Room *end;
 } Gamestate;
 
 /* Declarations of External Variables */
@@ -200,6 +203,7 @@ void add_column_east(Gamestate *g);
 void add_row_south(Gamestate *g);
 void add_column_west(Gamestate *g);
 void toggle_movement(Gamestate *g);
+void mark(char mark, Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -272,6 +276,7 @@ int main(void)
         case 12: (void) printf("Encountered unexpected error. Error code 12: Cannot move cursor in unknown direction.\n"); break;
         case 13: (void) printf("Encountered error. Error code 13: Unable to allocate memory for gamestate.\n"); break;
         case 14: (void) printf("Encountered error. Error code 14: Unable to allocate memory for settings.\n"); break;
+        case 15: (void) printf("Encountered unexpected error. Error code 15: Received unknown mark code; cannot parse.\n"); break;
     }
     return error_code;
 }
@@ -402,7 +407,7 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
     {
         r->exits[cardinal_direction] = 0;
     }
-
+    r->mark = 0;
     r->id_alias = NULL;
 
     return r;
@@ -722,6 +727,7 @@ Gamestate *initialize_gamestate(Display *display, Map *current_map, Settings *de
     g->current_map = current_map;
     g->current_cursor_focus = display->layout[0][0];
     g->user_settings = defaults;
+    g->start = g->end = NULL;
 
     return g;
 }
@@ -879,6 +885,8 @@ void print_display(Gamestate *g)
                 (void) printf(" ");
             if (current == g->current_cursor_focus)
                 (void) printf("*");
+            else if (current->mark)
+                (void) printf("%c", current->mark);
             else
                 (void) printf(" ");
             if (current->exists)
@@ -1104,6 +1112,12 @@ int parse_command(char *command, Gamestate *g)
         return 6;
     else if (caseless_strcmp("toggle movement", command))
         return 7;
+    else if (caseless_strcmp("mark start", command))
+        return 8;
+    else if (caseless_strcmp("mark end", command))
+        return 9;
+    else if (caseless_strcmp("unmark", command)) // Future: Make sure deleting a room also unmarks it so there's never two starts or ends.
+        return 10;
     else
         return 0;
 }
@@ -1136,6 +1150,9 @@ void obey_command(int command_code, Gamestate *g)
         case 5: move_cursor(SOUTH, g); break;
         case 6: move_cursor(WEST, g); break;
         case 7: toggle_movement(g); break;
+        case 8: mark('S', g); break;
+        case 9: mark('E', g); break;
+        case 10: mark(0, g); break;
     }
 }
 
@@ -1145,7 +1162,11 @@ void print_command_listing(Gamestate *g)
     (void) printf("----Valid Commands----\n"
                     "Function commands:\n"
                     "\t(H)elp: prints this listing\n"
-                    "\t(Q)uit: returns to main menu\n");
+                    "\t(Q)uit: returns to main menu\n"
+                    "Room editing commands:\n"
+                    "\tMark start: marks current room as the maze start\n"
+                    "\tMark end: marks current room as the maze end\n"
+                    "\tUnmark: removes start/end mark from current room\n");
     if (g->user_settings->movement_mode == NESW)
     {
         (void) printf(
@@ -1350,12 +1371,19 @@ void add_row_north(Gamestate *g)
         {
             new_layout[row + 1][column]->exists = g->display->layout[row][column]->exists;
             new_layout[row + 1][column]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row + 1][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
                 new_layout[row + 1][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
             }
         }
     }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate + 1][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate + 1][g->end->x_coordinate];
 
     free_layout(g->display->layout, g->current_map->height);
     free_map(g->current_map);
@@ -1401,12 +1429,19 @@ void add_column_east(Gamestate *g)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
             new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
                 new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
             }
         }
     }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate];
 
     free_layout(g->display->layout, g->current_map->height);
     free_map(g->current_map);
@@ -1452,12 +1487,19 @@ void add_row_south(Gamestate *g)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
             new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
                 new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
             }
         }
     }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate];
 
     free_layout(g->display->layout, g->current_map->height);
     free_map(g->current_map);
@@ -1503,12 +1545,19 @@ void add_column_west(Gamestate *g)
         {
             new_layout[row][column + 1]->exists = g->display->layout[row][column]->exists;
             new_layout[row][column + 1]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row][column + 1]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
                 new_layout[row][column + 1]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
             }
         }
     }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate + 1];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate + 1];
 
     free_layout(g->display->layout, g->current_map->height);
     free_map(g->current_map);
@@ -1526,6 +1575,97 @@ void toggle_movement(Gamestate *g)
     else
         g->user_settings->movement_mode = NESW;
     return;
+}
+
+void mark(char mark, Gamestate *g)
+{
+    char yesno = 0;
+
+    switch (mark)
+    {
+        default: error_code = 15; break;
+        case 'S':
+            if (g->start == g->current_cursor_focus)
+            {
+                // Do nothing.
+            }
+            else if (g->start != NULL)
+            {
+                do
+                {
+                    (void) printf("A different room has already been marked as the start. Would you like to erase that mark and place the start here instead? (y/n) ");
+                    yesno = tolower(getchar()), gobble_line();
+                } while (yesno != 'y' && yesno != 'n');
+                if (yesno == 'y')
+                {
+                    g->start->mark = 0;
+                    g->start = g->current_cursor_focus;
+                    g->current_cursor_focus->mark = 'S';
+                    if (g->end == g->start) // If overriding one mark with the other:
+                    {
+                        g->end = NULL;
+                    }
+                }
+            }
+            else
+            {
+                g->start = g->current_cursor_focus;
+                g->current_cursor_focus->mark = 'S';
+                if (g->end == g->start) // If overriding one mark with the other:
+                {
+                    g->end = NULL;
+                }
+            }
+            break;
+        case 'E':
+            if (g->end == g->current_cursor_focus)
+            {
+                // Do nothing.
+            }
+            else if (g->end != NULL)
+            {
+                do
+                {
+                    (void) printf("A different room has already been marked as the end. Would you like to erase that mark and place the end here instead? (y/n) ");
+                    yesno = tolower(getchar()), gobble_line();
+                } while (yesno != 'y' && yesno != 'n');
+                if (yesno == 'y')
+                {
+                    g->end->mark = 0;
+                    g->end = g->current_cursor_focus;
+                    g->current_cursor_focus->mark = 'E';
+                    if (g->start == g->end) // If overriding one mark with the other:
+                    {
+                        g->start = NULL;
+                    }
+                }
+            }
+            else
+            {
+                g->end = g->current_cursor_focus;
+                g->current_cursor_focus->mark = 'E';
+                if (g->start == g->end) // If overriding one mark with the other:
+                {
+                    g->start = NULL;
+                }
+            }
+            break;
+        case 0:
+            if (g->current_cursor_focus->mark != 0)
+            {
+                if (g->current_cursor_focus->mark == 'S')
+                {
+                    g->start = NULL;
+                    g->current_cursor_focus->mark = 0;
+                }
+                else
+                {
+                    g->end = NULL;
+                    g->current_cursor_focus->mark = 0;
+                }
+            }
+            break;
+    }
 }
 
 /*******************************************************************************************

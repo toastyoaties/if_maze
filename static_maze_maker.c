@@ -204,6 +204,8 @@ void add_row_south(Gamestate *g);
 void add_column_west(Gamestate *g);
 void toggle_movement(Gamestate *g);
 void mark(char mark, Gamestate *g);
+void delete(Gamestate *g);
+void undelete(Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -1118,6 +1120,10 @@ int parse_command(char *command, Gamestate *g)
         return 9;
     else if (caseless_strcmp("unmark", command)) // Future: Make sure deleting a room also unmarks it so there's never two starts or ends.
         return 10;
+    else if (caseless_strcmp("delete", command))
+        return 11;
+    else if (caseless_strcmp("undelete", command))
+        return 12;
     else
         return 0;
 }
@@ -1153,6 +1159,8 @@ void obey_command(int command_code, Gamestate *g)
         case 8: mark('S', g); break;
         case 9: mark('E', g); break;
         case 10: mark(0, g); break;
+        case 11: delete(g); break;
+        case 12: undelete(g); break;
     }
 }
 
@@ -1164,6 +1172,8 @@ void print_command_listing(Gamestate *g)
                     "\t(H)elp: prints this listing\n"
                     "\t(Q)uit: returns to main menu\n"
                     "Room editing commands:\n"
+                    "\tDelete: removes current room from map\n"
+                    "\tUndelete: restores deleted room to map\n"
                     "\tMark start: marks current room as the maze start\n"
                     "\tMark end: marks current room as the maze end\n"
                     "\tUnmark: removes start/end mark from current room\n");
@@ -1666,6 +1676,19 @@ void mark(char mark, Gamestate *g)
             }
             break;
     }
+}
+
+void delete(Gamestate *g)
+{
+    g->current_cursor_focus->exists = false;
+    mark(0, g);
+    return;
+}
+
+void undelete(Gamestate *g)
+{
+    g->current_cursor_focus->exists = true;
+    return;
 }
 
 /*******************************************************************************************

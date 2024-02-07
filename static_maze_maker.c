@@ -1118,7 +1118,7 @@ int parse_command(char *command, Gamestate *g)
         return 8;
     else if (caseless_strcmp("mark end", command))
         return 9;
-    else if (caseless_strcmp("unmark", command)) // Future: Make sure deleting a room also unmarks it so there's never two starts or ends.
+    else if (caseless_strcmp("unmark", command))
         return 10;
     else if (caseless_strcmp("delete", command))
         return 11;

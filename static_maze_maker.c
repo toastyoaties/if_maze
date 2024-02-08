@@ -1,5 +1,6 @@
 /****************************************************************************************************
- * Current goal: More user commands.                                                   *
+ * Current goal: Add user commands for expanding map ("add row north", etc)
+    Also:       Add user commands for expanding/shrinking display window.                                                   *
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -206,6 +207,8 @@ void toggle_movement(Gamestate *g);
 void mark(char mark, Gamestate *g);
 void delete(Gamestate *g);
 void undelete(Gamestate *g);
+void open(Gamestate *g, int direction);
+void close(Gamestate *g, int direction);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -279,6 +282,8 @@ int main(void)
         case 13: (void) printf("Encountered error. Error code 13: Unable to allocate memory for gamestate.\n"); break;
         case 14: (void) printf("Encountered error. Error code 14: Unable to allocate memory for settings.\n"); break;
         case 15: (void) printf("Encountered unexpected error. Error code 15: Received unknown mark code; cannot parse.\n"); break;
+        case 16: (void) printf("Encountered unexpected error. Error code 16: Received unknown open direction; cannot parse.\n"); break;
+        case 17: (void) printf("Encountered unexpected error. Error code 17: Received unknown close direction; cannot parse.\n"); break;
     }
     return error_code;
 }
@@ -875,7 +880,7 @@ void print_display(Gamestate *g)
             // Print either left hyphens or spaces depending on east exit per room
             //      (this code assumes an east exit always corresponds with a west exit to the left):
             for (int hyphen = 0; hyphen < left_hyphens; hyphen++)
-                if (current->exists && current->exits[EAST])
+                if (current->exists && current->exits[WEST])
                     (void) printf("-");
                 else
                     (void) printf(" ");
@@ -896,10 +901,10 @@ void print_display(Gamestate *g)
             else
                 (void) printf(" ");
 
-            // Print eighter right hyphens or spaces depending on west exit per room
+            // Print either right hyphens or spaces depending on west exit per room
             //      (this code assumes a west exit always corresponds with an east exit to the right):
             for (int hyphen = 0; hyphen < right_hyphens; hyphen++)
-                if (current->exists && current->exits[WEST])
+                if (current->exists && current->exits[EAST])
                     (void) printf("-");
                 else
                     (void) printf(" ");
@@ -1124,6 +1129,22 @@ int parse_command(char *command, Gamestate *g)
         return 11;
     else if (caseless_strcmp("undelete", command))
         return 12;
+    else if (caseless_strcmp("open up", command) || caseless_strcmp("open n", command) || caseless_strcmp("open north", command))
+        return 13;
+    else if (caseless_strcmp("open right", command) || caseless_strcmp("open e", command) || caseless_strcmp("open east", command))
+        return 14;
+    else if (caseless_strcmp("open down", command) || caseless_strcmp("open s", command) || caseless_strcmp("open south", command))
+        return 15;
+    else if (caseless_strcmp("open left", command) || caseless_strcmp("open w", command) || caseless_strcmp("open west", command))
+        return 16;
+    else if (caseless_strcmp("close up", command) || caseless_strcmp("close n", command) || caseless_strcmp("close north", command))
+        return 17;
+    else if (caseless_strcmp("close right", command) || caseless_strcmp("close e", command) || caseless_strcmp("close east", command))
+        return 18;
+    else if (caseless_strcmp("close down", command) || caseless_strcmp("close s", command) || caseless_strcmp("close south", command))
+        return 19;
+    else if (caseless_strcmp("close left", command) || caseless_strcmp("close w", command) || caseless_strcmp("close west", command))
+        return 20;
     else
         return 0;
 }
@@ -1161,6 +1182,14 @@ void obey_command(int command_code, Gamestate *g)
         case 10: mark(0, g); break;
         case 11: delete(g); break;
         case 12: undelete(g); break;
+        case 13: open(g, NORTH); break;
+        case 14: open(g, EAST); break;
+        case 15: open(g, SOUTH); break;
+        case 16: open(g, WEST); break;
+        case 17: close(g, NORTH); break;
+        case 18: close(g, EAST); break;
+        case 19: close(g, SOUTH); break;
+        case 20: close(g, WEST); break;
     }
 }
 
@@ -1176,7 +1205,10 @@ void print_command_listing(Gamestate *g)
                     "\tUndelete: restores deleted room to map\n"
                     "\tMark start: marks current room as the maze start\n"
                     "\tMark end: marks current room as the maze end\n"
-                    "\tUnmark: removes start/end mark from current room\n");
+                    "\tUnmark: removes start/end mark from current room\n"
+                    "\tOpen <direction>: connects current room with the room in <direction>.\n"
+                    "\tClose <direction>: disconnects current room with the room in <direction>.\n"
+                    "\t\t<direction> can be up/right/down/left or NESW\n");
     if (g->user_settings->movement_mode == NESW)
     {
         (void) printf(
@@ -1681,13 +1713,311 @@ void mark(char mark, Gamestate *g)
 void delete(Gamestate *g)
 {
     g->current_cursor_focus->exists = false;
+    // Remove start/end mark so that it can be placed elsewhere (and so that undeleting later doesn't conflict with new start/end):
     mark(0, g);
+    // Remove exits between this and surrounding rooms so the display doesn't end up with a hanging connection to a nonexistent room:
+    for (int i = NORTH; i < NUM_CARDINAL_DIRECTIONS; i++)
+    {
+        g->current_cursor_focus->exits[i] = false;
+    }
+    if (g->current_cursor_focus->y_coordinate != 0)
+        g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate]->exits[SOUTH] = false;
+    if (g->current_cursor_focus->x_coordinate != g->current_map->width - 1)
+        g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1]->exits[WEST] = false;
+    if (g->current_cursor_focus->y_coordinate != g->current_map->height - 1)
+        g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate]->exits[NORTH] = false;
+    if (g->current_cursor_focus->x_coordinate != 0)
+        g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1]->exits[EAST] = false;
+
     return;
 }
 
 void undelete(Gamestate *g)
 {
     g->current_cursor_focus->exists = true;
+    return;
+}
+
+void open(Gamestate *g, int direction)
+{
+    int yesno = 0;
+
+    if (!g->current_cursor_focus->exists)
+    {
+        #ifdef FORCE_BUFFERED_MODE
+            do
+            {
+                (void) printf("The current room has been deleted from the map. Would you like to restore it in order to add an opening? (y/n) ");
+                yesno = tolower(getchar()), gobble_line();
+            } while (yesno != 'y' && yesno != 'n');
+        #endif
+        #ifdef UNIX
+            //TODO
+        #endif
+        #ifdef WINDOWS
+            //TODO
+        #endif
+
+        if (yesno == 'y')
+        {
+            undelete(g);
+        }
+        else
+        {
+            return;
+        }
+    }
+
+    yesno = 0; //reset for next Qs
+
+    switch (direction)
+    {
+        default: error_code = 16; break;
+        case NORTH:
+            if (g->current_cursor_focus->y_coordinate == 0)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("There is no room to the north. Would you like to shift the coordinate system and create a new row? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    add_row_north(g);
+                }
+            }
+            else if (!g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate]->exists)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("The room to the north has been deleted from the map. Would you like to restore it in order to add an opening? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate];
+                    undelete(g);
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate];
+                }
+            }
+            if (yesno == 'y' || yesno == 0)
+            {
+                g->current_cursor_focus->exits[NORTH] = true;
+                g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate]->exits[SOUTH] = true;
+            }
+            break;
+        case EAST:
+            if (g->current_cursor_focus->x_coordinate == g->current_map->width - 1)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("There is no room to the east. Would you like to create a new column? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    add_column_east(g);
+                }
+            }
+            else if (!g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1]->exists)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("The room to the east has been deleted from the map. Would you like to restore it in order to add an opening? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1];
+                    undelete(g);
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1];
+                }
+            }
+            if (yesno == 'y' || yesno == 0)
+            {
+                g->current_cursor_focus->exits[EAST] = true;
+                g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1]->exits[WEST] = true;
+            }
+            break;
+        case SOUTH:
+            if (g->current_cursor_focus->y_coordinate == g->current_map->height - 1)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("There is no room to the south. Would you like to create a new row? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    add_row_south(g);
+                }
+            }
+            else if (!g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate]->exists)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("The room to the south has been deleted from the map. Would you like to restore it in order to add an opening? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate];
+                    undelete(g);
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate];
+                }
+            }
+            if (yesno == 'y' || yesno == 0)
+            {
+                g->current_cursor_focus->exits[SOUTH] = true;
+                g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate]->exits[NORTH] = true;
+            }
+            break;
+        case WEST:
+            if (g->current_cursor_focus->x_coordinate == 0)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("There is no room to the west. Would you like to shift the coordinate system and create a new column? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    add_column_west(g);
+                }
+            }
+            else if (!g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1]->exists)
+            {
+                #ifdef FORCE_BUFFERED_MODE
+                    do
+                    {
+                        (void) printf("The room to the west has been deleted from the map. Would you like to restore it in order to add an opening? (y/n) ");
+                        yesno = tolower(getchar()), gobble_line();
+                    } while (yesno != 'y' && yesno != 'n');
+                #endif
+                #ifdef UNIX
+                    //TODO
+                #endif
+                #ifdef WINDOWS
+                    //TODO
+                #endif
+
+                if (yesno == 'y')
+                {
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1];
+                    undelete(g);
+                    g->current_cursor_focus = g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1];
+                }
+            }
+            if (yesno == 'y' || yesno == 0)
+            {
+                g->current_cursor_focus->exits[WEST] = true;
+                g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1]->exits[EAST] = true;
+            }
+            break;
+    }
+    return;
+}
+
+void close(Gamestate *g, int direction)
+{
+    if (g->current_cursor_focus->exists)
+    {
+        switch (direction)
+        {
+            default: error_code = 17; break;
+            case NORTH:
+                if (g->current_cursor_focus->y_coordinate != 0 && g->current_cursor_focus->exits[NORTH])
+                {
+                    g->current_cursor_focus->exits[NORTH] = false;
+                    g->display->layout[g->current_cursor_focus->y_coordinate - 1][g->current_cursor_focus->x_coordinate]->exits[SOUTH] = false;
+                }
+                break;
+            case EAST:
+                if (g->current_cursor_focus->x_coordinate != g->current_map->width - 1 && g->current_cursor_focus->exits[EAST])
+                {
+                    g->current_cursor_focus->exits[EAST] = false;
+                    g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate + 1]->exits[WEST] = false;
+                }
+                break;
+            case SOUTH:
+                if (g->current_cursor_focus->y_coordinate != g->current_map->height - 1 && g->current_cursor_focus->exits[SOUTH])
+                {
+                    g->current_cursor_focus->exits[SOUTH] = false;
+                    g->display->layout[g->current_cursor_focus->y_coordinate + 1][g->current_cursor_focus->x_coordinate]->exits[NORTH] = false;
+                }
+                break;
+            case WEST:
+                if (g->current_cursor_focus->x_coordinate != 0 && g->current_cursor_focus->exits[WEST])
+                {
+                    g->current_cursor_focus->exits[WEST] = false;
+                    g->display->layout[g->current_cursor_focus->y_coordinate][g->current_cursor_focus->x_coordinate - 1]->exits[EAST] = false;
+                }
+                break;
+        }
+    }
     return;
 }
 

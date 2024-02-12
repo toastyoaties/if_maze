@@ -1,6 +1,5 @@
 /****************************************************************************************************
- * Current goal: Add user commands for expanding map ("add row north", etc)
-    Also:       Add user commands for expanding/shrinking display window.                                                   *
+ * Current goal: Add user commands for expanding/shrinking display window.                          *
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -209,6 +208,10 @@ void delete(Gamestate *g);
 void undelete(Gamestate *g);
 void open(Gamestate *g, int direction);
 void close(Gamestate *g, int direction);
+void remove_row_north(Gamestate *g);
+void remove_column_east(Gamestate *g);
+void remove_row_south(Gamestate *g);
+void remove_column_west(Gamestate *g);
 void save_map(Map *savable_map);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
@@ -1145,6 +1148,22 @@ int parse_command(char *command, Gamestate *g)
         return 19;
     else if (caseless_strcmp("close left", command) || caseless_strcmp("close w", command) || caseless_strcmp("close west", command))
         return 20;
+    else if (caseless_strcmp("add row north", command) || caseless_strcmp("add row n", command) || caseless_strcmp("add n", command))
+        return 21;
+    else if (caseless_strcmp("add column east", command) || caseless_strcmp("add column e", command) || caseless_strcmp("add e", command))
+        return 22;
+    else if (caseless_strcmp("add row south", command) || caseless_strcmp("add row s", command) || caseless_strcmp("add s", command))
+        return 23;
+    else if (caseless_strcmp("add column west", command) || caseless_strcmp("add column w", command) || caseless_strcmp("add w", command))
+        return 24;
+    else if (caseless_strcmp("remove row north", command) || caseless_strcmp("remove row n", command) || caseless_strcmp("remove n", command) || caseless_strcmp("rem n", command))
+        return 25;
+    else if (caseless_strcmp("remove column east", command) || caseless_strcmp("remove column e", command) || caseless_strcmp("remove e", command) || caseless_strcmp("rem e", command))
+        return 26;
+    else if (caseless_strcmp("remove row south", command) || caseless_strcmp("remove row s", command) || caseless_strcmp("remove s", command) || caseless_strcmp("rem s", command))
+        return 27;
+    else if (caseless_strcmp("remove column west", command) || caseless_strcmp("remove column w", command) || caseless_strcmp("remove w", command) || caseless_strcmp("rem w", command))
+        return 28;
     else
         return 0;
 }
@@ -1190,6 +1209,14 @@ void obey_command(int command_code, Gamestate *g)
         case 18: close(g, EAST); break;
         case 19: close(g, SOUTH); break;
         case 20: close(g, WEST); break;
+        case 21: add_row_north(g); break;
+        case 22: add_column_east(g); break;
+        case 23: add_row_south(g); break;
+        case 24: add_column_west(g); break;
+        case 25: remove_row_north(g); break;
+        case 26: remove_column_east(g); break;
+        case 27: remove_row_south(g); break;
+        case 28: remove_column_west(g); break;
     }
 }
 
@@ -1208,7 +1235,12 @@ void print_command_listing(Gamestate *g)
                     "\tUnmark: removes start/end mark from current room\n"
                     "\tOpen <direction>: connects current room with the room in <direction>.\n"
                     "\tClose <direction>: disconnects current room with the room in <direction>.\n"
-                    "\t\t<direction> can be up/right/down/left or NESW\n");
+                    "\t\t<direction> can be up/right/down/left or NESW\n"
+                    "Map editing commands:\n"
+                    "\tAdd row north / south (or add n/s): Creates a new map row in the specified direction.\n"
+                    "\tAdd column east / west (or add e/w): Creates a new map column in the specified direction.\n"
+                    "\tRemove row north / south (or rem n/s): Removes the furthest map row in the specified direction.\n"
+                    "\tRemove column east / west (or rem e/w): Removes the furthest map column in the specified direction.\n");
     if (g->user_settings->movement_mode == NESW)
     {
         (void) printf(
@@ -1282,8 +1314,9 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         if (yesno == 'y')
         {
             add_column_east(g);
-            // Move the display:
-            g->display->x_offset++;
+            // Move the display if display cannot grow:
+            if (g->display->width == MAX_DISPLAY_WIDTH && g->current_cursor_focus->x_coordinate == (g->display->width - 1) + g->display->x_offset)
+                g->display->x_offset++;
         }
     }
     else if (cardinal_direction == SOUTH && g->current_cursor_focus->y_coordinate == (g->current_map->height - 1)) // SOUTH LAYOUT EDGE
@@ -1305,8 +1338,9 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         if (yesno == 'y')
         {
             add_row_south(g);
-            // Move the display:
-            g->display->y_offset++;
+            // Move the display if display cannot grow:
+            if (g->display->height == MAX_DISPLAY_HEIGHT && g->current_cursor_focus->y_coordinate == (g->display->height - 1) + g->display->y_offset)
+                g->display->y_offset++;
         }
     }
     else if (cardinal_direction == WEST && g->current_cursor_focus->x_coordinate == 0) // WEST LAYOUT EDGE
@@ -1380,8 +1414,8 @@ void move_cursor(int cardinal_direction, Gamestate *g)
 
 void add_row_north(Gamestate *g)
 {
-    // Store cursor position:
-    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    // Store cursor position, adjusted inward if on southern end of map (to prevent cursor falling out of display after row is added):
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate == (g->display->height - 1) + g->display->y_offset ? g->current_cursor_focus->y_coordinate - 1 : g->current_cursor_focus->y_coordinate;
     int32_t cursor_x = g->current_cursor_focus->x_coordinate;
 
     Dimensions new_map_dim;
@@ -1432,6 +1466,10 @@ void add_row_north(Gamestate *g)
     g->display->layout = new_layout;
     g->current_map = new_map;
     g->current_cursor_focus = g->display->layout[cursor_y + 1][cursor_x];
+
+    // Resize display:
+    if (g->display->height < g->current_map->height && g->current_map->height <= MAX_DISPLAY_HEIGHT)
+        g->display->height = g->current_map->height, g->display->y_offset = 0;
 
     return;
 }
@@ -1491,6 +1529,10 @@ void add_column_east(Gamestate *g)
     g->current_map = new_map;
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
+    // Resize display:
+    if (g->display->width < g->current_map->width && g->current_map->width <= MAX_DISPLAY_WIDTH)
+        g->display->width = g->current_map->width, g->display->x_offset = 0;
+
     return;
 }
 
@@ -1549,14 +1591,18 @@ void add_row_south(Gamestate *g)
     g->current_map = new_map;
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
+    // Resize display:
+    if (g->display->height < g->current_map->height && g->current_map->height <= MAX_DISPLAY_HEIGHT)
+        g->display->height = g->current_map->height, g->display->y_offset = 0;
+
     return;
 }
 
 void add_column_west(Gamestate *g)
 {
-    // Store cursor position:
+    // Store cursor position, adjusted inward if on eastern end of map (to prevent cursor moving out of display after column is added):
     int32_t cursor_y = g->current_cursor_focus->y_coordinate;
-    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate == (g->display->width - 1) + g->display->x_offset ? g->current_cursor_focus->x_coordinate - 1 : g->current_cursor_focus->x_coordinate;
 
     Dimensions new_map_dim;
     new_map_dim.height = g->current_map->height;
@@ -1606,6 +1652,10 @@ void add_column_west(Gamestate *g)
     g->display->layout = new_layout;
     g->current_map = new_map;
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x + 1];
+
+    // Resize display:
+    if (g->display->width < g->current_map->width && g->current_map->width <= MAX_DISPLAY_WIDTH)
+        g->display->width = g->current_map->width, g->display->x_offset = 0;
 
     return;
 }
@@ -2018,6 +2068,294 @@ void close(Gamestate *g, int direction)
                 break;
         }
     }
+    return;
+}
+
+void remove_row_north(Gamestate *g)
+{
+    // Store cursor position, adjusting inward if on row/column to delete:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate == 0 ? g->current_cursor_focus->y_coordinate + 1 : g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height - 1;
+    new_map_dim.width = g->current_map->width;
+
+    if (new_map_dim.height < 1)
+    {
+        (void) printf("Unable to comply: Map must have a minimum height of 1.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    for (int32_t column = 0; column < g->current_map->width; column++)
+    {
+        g->current_cursor_focus = g->display->layout[0][column];
+        delete(g);
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height - 1; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row + 1][column]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row + 1][column]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row + 1][column]->mark;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row + 1][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate - 1][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate - 1][g->end->x_coordinate];
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y - 1][cursor_x];
+
+    // Shrink offset:
+    if (g->display->y_offset > 0)
+        g->display->y_offset--;
+
+    // Resize display:
+    if (g->display->height > g->current_map->height)
+        g->display->height = g->current_map->height, g->display->y_offset = 0;
+
+    return;
+}
+
+void remove_column_east(Gamestate *g)
+{
+    // Store cursor position, adjusting inward if on row/column to delete:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate == (g->display->width - 1) + g->display->x_offset ? g->current_cursor_focus->x_coordinate - 1 : g->current_cursor_focus->x_coordinate;
+
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height;
+    new_map_dim.width = g->current_map->width - 1;
+
+    if (new_map_dim.width < 1)
+    {
+        (void) printf("Unable to comply: Map must have a minimum width of 1.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        g->current_cursor_focus = g->display->layout[row][g->current_map->width - 1];
+        delete(g);
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width - 1; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row][column]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row][column]->mark;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate];
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
+
+    // Shrink offset:
+    if (g->display->x_offset > 0)
+        g->display->x_offset--;
+
+    // Resize display:
+    if (g->display->width > g->current_map->width)
+        g->display->width = g->current_map->width, g->display->x_offset = 0;
+
+    return;
+}
+
+void remove_row_south(Gamestate *g)
+{
+    // Store cursor position, adjusting inward if on row/column to delete:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate == (g->display->height - 1) + g->display->y_offset ? g->current_cursor_focus->y_coordinate - 1 : g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate;
+
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height - 1;
+    new_map_dim.width = g->current_map->width;
+
+    if (new_map_dim.height < 1)
+    {
+        (void) printf("Unable to comply: Map must have a minimum height of 1.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    for (int32_t column = 0; column < g->current_map->width; column++)
+    {
+        g->current_cursor_focus = g->display->layout[g->current_map->height - 1][column];
+        delete(g);
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height - 1; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row][column]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row][column]->mark;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate];
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
+
+    // Shrink offset:
+    if (g->display->y_offset > 0)
+        g->display->y_offset--;
+
+    // Resize display:
+    if (g->display->height > g->current_map->height)
+        g->display->height = g->current_map->height, g->display->y_offset = 0;
+
+    return;
+}
+
+void remove_column_west(Gamestate *g)
+{
+    // Store cursor position, adjusting inward if on row/column to delete:
+    int32_t cursor_y = g->current_cursor_focus->y_coordinate;
+    int32_t cursor_x = g->current_cursor_focus->x_coordinate ==  0 ? g->current_cursor_focus->x_coordinate + 1 : g->current_cursor_focus->x_coordinate;
+
+    Dimensions new_map_dim;
+    new_map_dim.height = g->current_map->height;
+    new_map_dim.width = g->current_map->width - 1;
+
+    if (new_map_dim.width < 1)
+    {
+        (void) printf("Unable to comply: Map must have a minimum width of 1.\n");
+        return;
+    }
+
+    Map *new_map = create_map(new_map_dim);
+    if (error_code)
+        return;
+
+    Room ***new_layout = create_initial_layout(new_map);
+    if (error_code)
+    {
+        free_layout(new_layout, new_map_dim.height);
+        free_map(new_map);
+        return;
+    }
+
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        g->current_cursor_focus = g->display->layout[row][0];
+        delete(g);
+    }
+
+    // Transfer established Room properties:
+    for (int32_t row = 0; row < g->current_map->height; row++)
+    {
+        for (int32_t column = 0; column < g->current_map->width - 1; column++)
+        {
+            new_layout[row][column]->exists = g->display->layout[row][column + 1]->exists;
+            new_layout[row][column]->id_alias = g->display->layout[row][column + 1]->id_alias;
+            new_layout[row][column]->mark = g->display->layout[row][column + 1]->mark;
+            for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
+            {
+                new_layout[row][column]->exits[cardinal_direction] = g->display->layout[row][column + 1]->exits[cardinal_direction];
+            }
+        }
+    }
+
+    // Transfer marked rooms:
+    if (g->start)
+        g->start = new_layout[g->start->y_coordinate][g->start->x_coordinate - 1];
+    if (g->end)
+        g->end = new_layout[g->end->y_coordinate][g->end->x_coordinate - 1];
+
+    free_layout(g->display->layout, g->current_map->height);
+    free_map(g->current_map);
+    g->display->layout = new_layout;
+    g->current_map = new_map;
+    g->current_cursor_focus = g->display->layout[cursor_y][cursor_x - 1];
+
+    // Shrink offset:
+    if (g->display->x_offset > 0)
+        g->display->x_offset--;
+
+    // Resize display:
+    if (g->display->width > g->current_map->width)
+        g->display->width = g->current_map->width, g->display->x_offset = 0;
+
     return;
 }
 

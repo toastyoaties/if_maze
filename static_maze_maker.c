@@ -1,5 +1,7 @@
 /****************************************************************************************************
- * Current goal: Add user commands for expanding/shrinking display window.                          *
+ * Current goal: the atoi() conversions during parsing of the display #x# command can lead to UB if user provides too-large numbers. Fix to prevent UB (whether by limiting size of string to be passed to atoi(), or by replacing atoi() with strtol() [see: https://en.cppreference.com/w/c/string/byte/strtol ]).
+ * Afterwards: Program save/load, and program letters-to-numbers coordinate conversion, and program user ability to move cursor to specific coordinates.
+    Afterwards: Program non-buffered input.
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -95,6 +97,7 @@
 #define NUM_LETTERS 26
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#define NEEDED_LEN 11
 
 /* Type Definitions */
 enum cardinal_directions
@@ -154,6 +157,8 @@ typedef struct command_c
 typedef struct settings
 {
     int movement_mode;
+    int max_display_height;
+    int max_display_width;
 } Settings;
 
 typedef struct gamestate
@@ -195,6 +200,8 @@ int get_command(char *prompt, Gamestate *g);
 void free_command(Command_C *root);
 int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
+int display_strcmp(char *command, int *user_display_rows, int *user_display_columns);
+int handle_display_command(Gamestate *g, int user_rows, int user_columns);
 void obey_command(int command_code, Gamestate *g);
 void print_command_listing(Gamestate *g);
 void move_cursor(int cardinal_direction, Gamestate *g);
@@ -287,6 +294,8 @@ int main(void)
         case 15: (void) printf("Encountered unexpected error. Error code 15: Received unknown mark code; cannot parse.\n"); break;
         case 16: (void) printf("Encountered unexpected error. Error code 16: Received unknown open direction; cannot parse.\n"); break;
         case 17: (void) printf("Encountered unexpected error. Error code 17: Received unknown close direction; cannot parse.\n"); break;
+        case 18: (void) printf("Encountered error. Error code 18: Unable to allocate memory for user's display y-dimension string.\n"); break;
+        case 19: (void) printf("Encountered error. Error code 19: Unable to allocate memory for user's display x-dimension string.\n"); break;
     }
     return error_code;
 }
@@ -712,6 +721,8 @@ Settings *initialize_settings(void)
     }
 
     s->movement_mode = NESW;
+    s->max_display_height = MAX_DISPLAY_HEIGHT;
+    s->max_display_width = MAX_DISPLAY_WIDTH;
 
     return s;
 }
@@ -761,6 +772,32 @@ void print_display(Gamestate *g)
     //     int32_t x_offset;
     // } Display;
 
+    // Reset display to map size or maximum size, whichever is smaller:
+    g->display->height = g->current_map->height < g->user_settings->max_display_height ? g->current_map->height : g->user_settings->max_display_height;
+    g->display->width = g->current_map->width < g->user_settings->max_display_width ? g->current_map->width : g->user_settings->max_display_width;
+
+    // Shrink offset so that it won't exceed map size when combined with display:
+    if (g->display->height + g->display->y_offset > g->current_map->height)
+        g->display->y_offset = g->current_map->height - g->display->height;
+    if (g->display->width + g->display->x_offset > g->current_map->width)
+        g->display->x_offset = g->current_map->width - g->display->width;
+
+    // Reset cursor if off display:
+    int new_cursor_y = 0, new_cursor_x = 0;
+    if (g->current_cursor_focus->y_coordinate > g->display->height + g->display->y_offset - 1) // if below screen
+        new_cursor_y = g->display->height + g->display->y_offset - 1;
+    else if (g->current_cursor_focus->y_coordinate < g->display->y_offset) // if above screen
+        new_cursor_y = g->display->y_offset;
+    else
+        new_cursor_y = g->current_cursor_focus->y_coordinate;
+    if (g->current_cursor_focus->x_coordinate > g->display->width + g->display->x_offset - 1) // if off-screen to the right
+        new_cursor_x = g->display->width + g->display->x_offset - 1;
+    else if (g->current_cursor_focus->x_coordinate < g->display->x_offset) // if off-screen to the left
+        new_cursor_x = g->display->x_offset;
+    else
+        new_cursor_x = g->current_cursor_focus->x_coordinate;
+    g->current_cursor_focus = g->display->layout[new_cursor_y][new_cursor_x];
+
     // Find max screen length of y-coordinates to display, for formatting purposes:
     char *longest_y_string = ystr(g->display->height - 1 + g->display->y_offset);
     if (error_code) return;
@@ -774,7 +811,7 @@ void print_display(Gamestate *g)
     int min_cell_width = 5;
     int space_on_both_sides = 2;
     int cell_width = min_cell_width > longest_number_digits + space_on_both_sides ? min_cell_width : longest_number_digits + space_on_both_sides;
-    int assumed_terminal_width_in_cols = MAX_DISPLAY_WIDTH * min_cell_width;
+    int assumed_terminal_width_in_cols = g->user_settings->max_display_width * min_cell_width;
     if (assumed_terminal_width_in_cols < g->display->width * cell_width)
         g->display->width = assumed_terminal_width_in_cols / cell_width;
     int room_width = 3;
@@ -1108,6 +1145,10 @@ void free_command(Command_C *root)
 
 int parse_command(char *command, Gamestate *g)
 {
+    // Initialize variables necessary for parsing:
+    int user_display_rows = 0, user_display_columns = 0; // Needed to parse user's display commands.
+
+    // String comparisons and code returns:
     if (caseless_strcmp("help", command) || caseless_strcmp("h", command))
         return 1;
     else if (caseless_strcmp("quit", command) || caseless_strcmp("q", command))
@@ -1164,8 +1205,10 @@ int parse_command(char *command, Gamestate *g)
         return 27;
     else if (caseless_strcmp("remove column west", command) || caseless_strcmp("remove column w", command) || caseless_strcmp("remove w", command) || caseless_strcmp("rem w", command))
         return 28;
+    else if (display_strcmp(command, &user_display_rows, &user_display_columns))
+        return handle_display_command(g, user_display_rows, user_display_columns);
     else
-        return 0;
+        return error_code ? -1 : 0;
 }
 
 int caseless_strcmp(char *str1, char *str2)
@@ -1180,6 +1223,95 @@ int caseless_strcmp(char *str1, char *str2)
             return 0;
     }
     return 1;
+}
+
+int display_strcmp(char *command, int *user_display_rows, int *user_display_columns)
+{
+    // "display #x#" is at least NEEDED_LEN chars long:
+    int n = strlen(command);
+    if (n < NEEDED_LEN)
+        return 0;
+
+    // Make sure command matches the necessary model (while also preparing to convert user dimensions to ints):
+    //      First section:
+    char *needed_start = "display ";
+    int n2 = strlen(needed_start);
+    int index = 0, y_index = 0, x_index = 0;
+    for (; index < n2; index++)
+    {
+        if (needed_start[index] != tolower(command[index]))
+            return 0;
+    }
+    //      Second section:
+    if (!isdigit(command[index]))
+        return 0;
+    int y_dimension_len = 0, x_dimension_len = 0;
+    y_index = index;
+    while (isdigit(command[index]))
+    {
+        y_dimension_len++;
+        index++;
+    }
+    //      Third section:
+    if (tolower(command[index++]) != 'x')
+        return 0;
+    //      Fourth section:
+    if (!isdigit(command[index]))
+        return 0;
+    x_index = index;
+    while (isdigit(command[index]))
+    {
+        x_dimension_len++;
+        index++;
+    }
+    //      Fifth section:
+    if (command[index] != '\0')
+        return 0;
+
+    // Capture numbers by converting from char * to int:
+    char *y_dim_chars = malloc(sizeof(char) * (y_dimension_len + 1));
+    if (y_dim_chars == NULL)
+    {
+        error_code = 18;
+        return 0;
+    }
+    char *x_dim_chars = malloc(sizeof(char) * (x_dimension_len + 1));
+    if (x_dim_chars == NULL)
+    {
+        error_code = 19;
+        free(y_dim_chars);
+        return 0;
+    }
+
+    int i = 0;
+    for (; i < y_dimension_len; i++)
+        y_dim_chars[i] = command[y_index++];
+    y_dim_chars[i] = '\0';
+    *user_display_rows = atoi(y_dim_chars);
+    free(y_dim_chars);
+
+    for (i = 0; i < x_dimension_len; i++)
+        x_dim_chars[i] = command[x_index++];
+    x_dim_chars[i] = '\0';
+    *user_display_columns = atoi(x_dim_chars);
+    free(x_dim_chars);
+
+    return 1;
+}
+
+int handle_display_command(Gamestate *g, int user_rows, int user_columns)
+{
+    // Check if 0s:
+    if (user_rows == 0 || user_columns == 0)
+        return 29;
+
+    // Check if values cannot fit inside int32_t:
+    // (Mask off any upper bits that won't fit int32_t, then check if the int32_t version matches original.)
+    if (user_rows != (user_rows & INT32_MAX) || user_columns != (user_columns & INT32_MAX))
+        return 30;
+
+    g->user_settings->max_display_height = user_rows, g->user_settings->max_display_width = user_columns;
+    return -1;
 }
 
 void obey_command(int command_code, Gamestate *g)
@@ -1217,6 +1349,8 @@ void obey_command(int command_code, Gamestate *g)
         case 26: remove_column_east(g); break;
         case 27: remove_row_south(g); break;
         case 28: remove_column_west(g); break;
+        case 29: (void) printf("Display window must be at least 1x1.\n"), gobble_line(); break;
+        case 30: (void) printf("Display window cannot be that large.\n"), gobble_line(); break;
     }
 }
 
@@ -1233,33 +1367,35 @@ void print_command_listing(Gamestate *g)
                     "\tMark start: marks current room as the maze start\n"
                     "\tMark end: marks current room as the maze end\n"
                     "\tUnmark: removes start/end mark from current room\n"
-                    "\tOpen <direction>: connects current room with the room in <direction>.\n"
-                    "\tClose <direction>: disconnects current room with the room in <direction>.\n"
+                    "\tOpen <direction>: connects current room with the room in <direction>\n"
+                    "\tClose <direction>: disconnects current room with the room in <direction>\n"
                     "\t\t<direction> can be up/right/down/left or NESW\n"
                     "Map editing commands:\n"
-                    "\tAdd row north / south (or add n/s): Creates a new map row in the specified direction.\n"
-                    "\tAdd column east / west (or add e/w): Creates a new map column in the specified direction.\n"
-                    "\tRemove row north / south (or rem n/s): Removes the furthest map row in the specified direction.\n"
-                    "\tRemove column east / west (or rem e/w): Removes the furthest map column in the specified direction.\n");
+                    "\tAdd row north / south (or add n/s): Creates a new map row in the specified direction\n"
+                    "\tAdd column east / west (or add e/w): Creates a new map column in the specified direction\n"
+                    "\tRemove row north / south (or rem n/s): Removes the furthest map row in the specified direction\n"
+                    "\tRemove column east / west (or rem e/w): Removes the furthest map column in the specified direction\n"
+                    "Settings commands:\n"
+                    "\tDisplay <rows>x<columns>: Adjusts the maximum display size\n");
     if (g->user_settings->movement_mode == NESW)
     {
         (void) printf(
+                        "\tToggle Movement: re-maps movement commands to WASD\n"
                         "Movement commands:\n"
                         "\t(N)orth: moves the cursor up one space\n"
                         "\t(E)ast: moves the cursor right one space\n"
                         "\t(S)outh: moves the cursor down one space\n"
-                        "\t(W)est: moves the cursor left one space\n"
-                        "\tToggle Movement: re-maps movement commands to WASD\n");
+                        "\t(W)est: moves the cursor left one space\n");
     }
     else
     {
         (void) printf(
+                        "\tToggle Movement: re-maps movement commands to NESW\n"
                         "Movement commands:\n"
                         "\tUp (W): moves the cursor up one space\n"
                         "\tLeft (A): moves the cursor left one space\n"
                         "\tDown (S): moves the cursor down one space\n"
-                        "\tRight (D): moves the cursor right one space\n"
-                        "\tToggle Movement: re-maps movement commands to NESW\n");
+                        "\tRight (D): moves the cursor right one space\n");
     }
     (void) printf("\nCommands are not case-sensitive.\n");
     gobble_line();
@@ -1315,7 +1451,7 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         {
             add_column_east(g);
             // Move the display if display cannot grow:
-            if (g->display->width == MAX_DISPLAY_WIDTH && g->current_cursor_focus->x_coordinate == (g->display->width - 1) + g->display->x_offset)
+            if (g->display->width == g->user_settings->max_display_width && g->current_cursor_focus->x_coordinate == (g->display->width - 1) + g->display->x_offset)
                 g->display->x_offset++;
         }
     }
@@ -1339,7 +1475,7 @@ void move_cursor(int cardinal_direction, Gamestate *g)
         {
             add_row_south(g);
             // Move the display if display cannot grow:
-            if (g->display->height == MAX_DISPLAY_HEIGHT && g->current_cursor_focus->y_coordinate == (g->display->height - 1) + g->display->y_offset)
+            if (g->display->height == g->user_settings->max_display_height && g->current_cursor_focus->y_coordinate == (g->display->height - 1) + g->display->y_offset)
                 g->display->y_offset++;
         }
     }
@@ -1468,7 +1604,7 @@ void add_row_north(Gamestate *g)
     g->current_cursor_focus = g->display->layout[cursor_y + 1][cursor_x];
 
     // Resize display:
-    if (g->display->height < g->current_map->height && g->current_map->height <= MAX_DISPLAY_HEIGHT)
+    if (g->display->height < g->current_map->height && g->current_map->height <= g->user_settings->max_display_height)
         g->display->height = g->current_map->height, g->display->y_offset = 0;
 
     return;
@@ -1530,7 +1666,7 @@ void add_column_east(Gamestate *g)
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
     // Resize display:
-    if (g->display->width < g->current_map->width && g->current_map->width <= MAX_DISPLAY_WIDTH)
+    if (g->display->width < g->current_map->width && g->current_map->width <= g->user_settings->max_display_width)
         g->display->width = g->current_map->width, g->display->x_offset = 0;
 
     return;
@@ -1592,7 +1728,7 @@ void add_row_south(Gamestate *g)
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x];
 
     // Resize display:
-    if (g->display->height < g->current_map->height && g->current_map->height <= MAX_DISPLAY_HEIGHT)
+    if (g->display->height < g->current_map->height && g->current_map->height <= g->user_settings->max_display_height)
         g->display->height = g->current_map->height, g->display->y_offset = 0;
 
     return;
@@ -1654,7 +1790,7 @@ void add_column_west(Gamestate *g)
     g->current_cursor_focus = g->display->layout[cursor_y][cursor_x + 1];
 
     // Resize display:
-    if (g->display->width < g->current_map->width && g->current_map->width <= MAX_DISPLAY_WIDTH)
+    if (g->display->width < g->current_map->width && g->current_map->width <= g->user_settings->max_display_width)
         g->display->width = g->current_map->width, g->display->x_offset = 0;
 
     return;

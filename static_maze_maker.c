@@ -1,6 +1,7 @@
 /****************************************************************************************************
- * Current goal: the atoi() conversions during parsing of the display #x# command can lead to UB if user provides too-large numbers. Fix to prevent UB (whether by limiting size of string to be passed to atoi(), or by replacing atoi() with strtol() [see: https://en.cppreference.com/w/c/string/byte/strtol ]).
- * Afterwards: Program save/load, and program letters-to-numbers coordinate conversion, and program user ability to move cursor to specific coordinates.
+ * Current goal: program letters-to-numbers coordinate conversion.
+ * Afterwards: program user ability to move cursor to specific coordinates.
+ * Afterwards: Program save/load
     Afterwards: Program non-buffered input.
  *                                                                                                  *
  *                                                                                                  *
@@ -87,6 +88,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
 
 /* Preprocessing Directives (#define) */
 #define CLEAR_CONSOLE (void) printf("\033[H\033[2J\033[3J") // ANSI escapes for clearing screen and scrollback.
@@ -98,6 +100,9 @@
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 #define NEEDED_LEN 11
+#define INT32_MAXIMUM_STRING STRINGIZE2(INT32_MAX)
+#define STRINGIZE2(x) STRINGIZE(x)
+#define STRINGIZE(x) #x
 
 /* Type Definitions */
 enum cardinal_directions
@@ -200,8 +205,8 @@ int get_command(char *prompt, Gamestate *g);
 void free_command(Command_C *root);
 int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
-int display_strcmp(char *command, int *user_display_rows, int *user_display_columns);
-int handle_display_command(Gamestate *g, int user_rows, int user_columns);
+int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_display_columns);
+int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns);
 void obey_command(int command_code, Gamestate *g);
 void print_command_listing(Gamestate *g);
 void move_cursor(int cardinal_direction, Gamestate *g);
@@ -1146,7 +1151,7 @@ void free_command(Command_C *root)
 int parse_command(char *command, Gamestate *g)
 {
     // Initialize variables necessary for parsing:
-    int user_display_rows = 0, user_display_columns = 0; // Needed to parse user's display commands.
+    int32_t user_display_rows = 0, user_display_columns = 0; // Needed to parse user's display commands.
 
     // String comparisons and code returns:
     if (caseless_strcmp("help", command) || caseless_strcmp("h", command))
@@ -1225,7 +1230,7 @@ int caseless_strcmp(char *str1, char *str2)
     return 1;
 }
 
-int display_strcmp(char *command, int *user_display_rows, int *user_display_columns)
+int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_display_columns)
 {
     // "display #x#" is at least NEEDED_LEN chars long:
     int n = strlen(command);
@@ -1283,32 +1288,64 @@ int display_strcmp(char *command, int *user_display_rows, int *user_display_colu
         return 0;
     }
 
+    // Convert while ensuring user submitted numbers are not large enough to cause UB from atoi():
     int i = 0;
     for (; i < y_dimension_len; i++)
         y_dim_chars[i] = command[y_index++];
     y_dim_chars[i] = '\0';
-    *user_display_rows = atoi(y_dim_chars);
-    free(y_dim_chars);
 
     for (i = 0; i < x_dimension_len; i++)
         x_dim_chars[i] = command[x_index++];
     x_dim_chars[i] = '\0';
-    *user_display_columns = atoi(x_dim_chars);
+
+    bool too_big = false;
+    int max_len = strlen(INT32_MAXIMUM_STRING);
+    int y_len = strlen(y_dim_chars), x_len = strlen(x_dim_chars);
+    if (y_len > max_len)
+        *user_display_rows = INT32_MAX;
+    else if (y_len < max_len)
+        *user_display_rows = atoi(y_dim_chars);
+    else // same length
+    {
+        for (i = 0; i < max_len; i++)
+            if (y_dim_chars[i] - '0' > INT32_MAXIMUM_STRING[i] - '0')
+            {
+                *user_display_rows = INT32_MAX;
+                too_big = true;
+                break;
+            }
+        if (!too_big)
+            *user_display_rows = atoi(y_dim_chars);
+    }
+    too_big = false;
+    if (x_len > max_len)
+        *user_display_columns = INT32_MAX;
+    else if (x_len < max_len)
+        *user_display_columns = atoi(x_dim_chars);
+    else // same length
+    {
+        for (i = 0; i < max_len; i++)
+            if (x_dim_chars[i] - '0' > INT32_MAXIMUM_STRING[i] - '0')
+            {
+                *user_display_columns = INT32_MAX;
+                too_big = true;
+                break;
+            }
+        if (!too_big)
+            *user_display_columns = atoi(x_dim_chars);
+    }
+
+    free(y_dim_chars);
     free(x_dim_chars);
 
     return 1;
 }
 
-int handle_display_command(Gamestate *g, int user_rows, int user_columns)
+int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns)
 {
     // Check if 0s:
     if (user_rows == 0 || user_columns == 0)
         return 29;
-
-    // Check if values cannot fit inside int32_t:
-    // (Mask off any upper bits that won't fit int32_t, then check if the int32_t version matches original.)
-    if (user_rows != (user_rows & INT32_MAX) || user_columns != (user_columns & INT32_MAX))
-        return 30;
 
     g->user_settings->max_display_height = user_rows, g->user_settings->max_display_width = user_columns;
     return -1;
@@ -1350,7 +1387,6 @@ void obey_command(int command_code, Gamestate *g)
         case 27: remove_row_south(g); break;
         case 28: remove_column_west(g); break;
         case 29: (void) printf("Display window must be at least 1x1.\n"), gobble_line(); break;
-        case 30: (void) printf("Display window cannot be that large.\n"), gobble_line(); break;
     }
 }
 

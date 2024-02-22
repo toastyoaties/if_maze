@@ -4,6 +4,7 @@
  * Afterwards: Program save/load
     Afterwards: Program non-buffered input.
  *                                                                                                  *
+    Potential extras: Automated checking to see if maze is traversable; procedural map generation, demo map to play.
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -96,8 +97,8 @@
 #define MAX_DISPLAY_HEIGHT 20
 #define MAX_DISPLAY_WIDTH 20
 #define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
-#define NUM_LETTERS 26
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
+#define NUM_LETTERS 26
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 #define NEEDED_LEN 11
 #define INT32_MAXIMUM_STRING STRINGIZE2(INT32_MAX)
@@ -207,6 +208,8 @@ int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
 int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_display_columns);
 int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns);
+int32_t convert_letters_to_numbers(char *letter_coordinate);
+int letter_position_in_alphabet(char letter);
 void obey_command(int command_code, Gamestate *g);
 void print_command_listing(Gamestate *g);
 void move_cursor(int cardinal_direction, Gamestate *g);
@@ -301,6 +304,7 @@ int main(void)
         case 17: (void) printf("Encountered unexpected error. Error code 17: Received unknown close direction; cannot parse.\n"); break;
         case 18: (void) printf("Encountered error. Error code 18: Unable to allocate memory for user's display y-dimension string.\n"); break;
         case 19: (void) printf("Encountered error. Error code 19: Unable to allocate memory for user's display x-dimension string.\n"); break;
+        case 20: (void) printf("Encountered unexpected error. Error code 20: Passed character not in alphabet.\n"); break;
     }
     return error_code;
 }
@@ -482,7 +486,6 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
 
     Gamestate *gamestate;
 
-    //Initialize the above three declared variables:
     if (current_gamestate == NULL) // If starting a new map, not loading one:
     {
         // Temp variables used for initialization purposes only:
@@ -1314,6 +1317,20 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
                 too_big = true;
                 break;
             }
+            /*
+             * Note on the prior "if" statement:
+             * For those who are (like I was) concerned about portability between character sets (in other words, for anyone worried
+             * about whether their C code will run correctly even on systems that do not use ASCII character encoding),
+             * this technique of converting a character of an integer into an actual integer (ie, converting '7' to 7, etc)
+             * is, in fact, portable--at least as of C99. According to the C99 standard (§5.2.1, paragraph 3):
+             * "In both the source and execution basic character sets,
+             * the value of each character after 0 in the above list of decimal digits [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+             * shall be one greater than the value of the previous."
+             * That being said, I do not know if this is guaranteed by the C89 (C90) standard, which is still
+             * a very widely used version of C.
+             * It's worth noting that the C standard does NOT guaranteed that the *alphabetical* characters
+             * will be contiguous, only the digit characters (meaning "<char> - '0'" is portable, but "<char> - 'A'" isn't always).
+             */
         if (!too_big)
             *user_display_rows = atoi(y_dim_chars);
     }
@@ -1349,6 +1366,35 @@ int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns
 
     g->user_settings->max_display_height = user_rows, g->user_settings->max_display_width = user_columns;
     return -1;
+}
+
+int32_t convert_letters_to_numbers(char *letter_coordinate)
+{
+    int n = strlen(letter_coordinate);
+    int32_t sum = 0;
+    for (int i = 0, digit = n; i < n; i++, digit--)
+    {
+        int letter_position = letter_position_in_alphabet(letter_coordinate[i]);
+        if (letter_position == -1)
+        {
+            error_code = 20;
+            return -1;
+        }
+        sum += letter_position * pow(NUM_LETTERS, digit - 1);
+    }
+
+    return --sum; // Decrement to start from zero.
+}
+
+int letter_position_in_alphabet(char letter) // Positions start at 1
+{
+    for (int i = 0; i < NUM_LETTERS; i++)
+    {
+        if (ALPHABET[i] == letter)
+            return ++i;
+    }
+
+    return -1; // Not in alphabet.
 }
 
 void obey_command(int command_code, Gamestate *g)

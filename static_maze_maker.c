@@ -1,7 +1,5 @@
 /****************************************************************************************************
- * Current goal: program letters-to-numbers coordinate conversion.
- * Afterwards: program user ability to move cursor to specific coordinates.
- * Afterwards: Program save/load
+ * Current goal: Program save/load
     Afterwards: Program non-buffered input.
  *                                                                                                  *
     Potential extras: Automated checking to see if maze is traversable; procedural map generation, demo map to play.
@@ -97,10 +95,12 @@
 #define MAX_DISPLAY_HEIGHT 20
 #define MAX_DISPLAY_WIDTH 20
 #define MAX_COORDINATE 321272405 // Because of the use of the pow() function, combined with the int32_t limit.
+#define MAX_LETTER_COORDINATE "ZZZZZZ"
 #define MAX_ID ((MAX_COORDINATE + 1) * (MAX_COORDINATE + 1))
 #define NUM_LETTERS 26
 #define ALPHABET "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-#define NEEDED_LEN 11
+#define MIN_DISPLAY_COMMAND_LENGTH 11
+#define MIN_JUMP_COMMAND_LENGTH 10
 #define INT32_MAXIMUM_STRING STRINGIZE2(INT32_MAX)
 #define STRINGIZE2(x) STRINGIZE(x)
 #define STRINGIZE(x) #x
@@ -208,6 +208,8 @@ int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
 int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_display_columns);
 int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns);
+int jump_strcmp(char *command, char **letter_coordinate, char **number_coordinate);
+int handle_jump_command(Gamestate *g, char *letter_coordinate, char *number_coordinate);
 int32_t convert_letters_to_numbers(char *letter_coordinate);
 int letter_position_in_alphabet(char letter);
 void obey_command(int command_code, Gamestate *g);
@@ -284,7 +286,8 @@ int main(void)
     quit:
     switch (error_code)
     {
-        default: break;
+        default: (void) printf("Encountered unexpected error. Error was assigned error code %d, but this code corresponds to no known error.\n", error_code); break;
+        case 0: break; // no error
         case 1: (void) printf("Encountered unexpected error. Error code 1: Unable to find room with matching coordinates.\n"); break;
         case 2: (void) printf("Encountered error. Error code 2: Unable to allocate memory for the layout's worth of rows.\n"); break;
         case 3: (void) printf("Encountered error. Error code 3: Unable to allocate memory for the columns in one or all of the layout's rows.\n"); break;
@@ -305,6 +308,9 @@ int main(void)
         case 18: (void) printf("Encountered error. Error code 18: Unable to allocate memory for user's display y-dimension string.\n"); break;
         case 19: (void) printf("Encountered error. Error code 19: Unable to allocate memory for user's display x-dimension string.\n"); break;
         case 20: (void) printf("Encountered unexpected error. Error code 20: Passed character not in alphabet.\n"); break;
+        case 21: (void) printf("Encountered error. Error code 21: Unable to allocate memory for normalized version of user's jump command.\n"); break;
+        case 22: (void) printf("Encountered error. Error code 22: Unable to allocate memory for letter coordinates from user's jump command.\n"); break;
+        case 23: (void) printf("Encountered error. Error code 23: Unable to allocate memory for number coordinates from user's jump command.\n"); break;
     }
     return error_code;
 }
@@ -1155,6 +1161,7 @@ int parse_command(char *command, Gamestate *g)
 {
     // Initialize variables necessary for parsing:
     int32_t user_display_rows = 0, user_display_columns = 0; // Needed to parse user's display commands.
+    char *letter_coordinate_holder = NULL, *number_coordinate_holder = NULL; // Needed to parse user's jump commands.
 
     // String comparisons and code returns:
     if (caseless_strcmp("help", command) || caseless_strcmp("h", command))
@@ -1215,6 +1222,8 @@ int parse_command(char *command, Gamestate *g)
         return 28;
     else if (display_strcmp(command, &user_display_rows, &user_display_columns))
         return handle_display_command(g, user_display_rows, user_display_columns);
+    else if (jump_strcmp(command, &letter_coordinate_holder, &number_coordinate_holder))
+        return handle_jump_command(g, letter_coordinate_holder, number_coordinate_holder);
     else
         return error_code ? -1 : 0;
 }
@@ -1235,9 +1244,9 @@ int caseless_strcmp(char *str1, char *str2)
 
 int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_display_columns)
 {
-    // "display #x#" is at least NEEDED_LEN chars long:
+    // "display #x#" is at least MIN_DISPLAY_COMMAND_LENGTH chars long:
     int n = strlen(command);
-    if (n < NEEDED_LEN)
+    if (n < MIN_DISPLAY_COMMAND_LENGTH)
         return 0;
 
     // Make sure command matches the necessary model (while also preparing to convert user dimensions to ints):
@@ -1245,6 +1254,7 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
     char *needed_start = "display ";
     int n2 = strlen(needed_start);
     int index = 0, y_index = 0, x_index = 0;
+    bool leading_zero = false;
     for (; index < n2; index++)
     {
         if (needed_start[index] != tolower(command[index]))
@@ -1253,6 +1263,8 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
     //      Second section:
     if (!isdigit(command[index]))
         return 0;
+    if (command[index] == '0')
+        leading_zero = true;
     int y_dimension_len = 0, x_dimension_len = 0;
     y_index = index;
     while (isdigit(command[index]))
@@ -1260,18 +1272,25 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
         y_dimension_len++;
         index++;
     }
+    if (leading_zero && y_dimension_len > 1)
+        return 0;
+    leading_zero = false;
     //      Third section:
     if (tolower(command[index++]) != 'x')
         return 0;
     //      Fourth section:
     if (!isdigit(command[index]))
         return 0;
+    if (command[index] == '0')
+        leading_zero = true;
     x_index = index;
     while (isdigit(command[index]))
     {
         x_dimension_len++;
         index++;
     }
+    if (leading_zero && x_dimension_len > 1)
+        return 0;
     //      Fifth section:
     if (command[index] != '\0')
         return 0;
@@ -1291,7 +1310,7 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
         return 0;
     }
 
-    // Convert while ensuring user submitted numbers are not large enough to cause UB from atoi():
+    // Convert while ensuring user submitted numbers are not too large to fit in an int32:
     int i = 0;
     for (; i < y_dimension_len; i++)
         y_dim_chars[i] = command[y_index++];
@@ -1307,7 +1326,13 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
     if (y_len > max_len)
         *user_display_rows = INT32_MAX;
     else if (y_len < max_len)
-        *user_display_rows = atoi(y_dim_chars);
+    {
+        // Convert input:
+        int32_t typecast = 0;
+        for (i = 0; i < y_len; i++)
+            typecast += (y_dim_chars[(y_len - 1) - i] - '0') * (pow(10, i));
+        *user_display_rows = typecast;
+    }
     else // same length
     {
         for (i = 0; i < max_len; i++)
@@ -1322,23 +1347,34 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
              * For those who are (like I was) concerned about portability between character sets (in other words, for anyone worried
              * about whether their C code will run correctly even on systems that do not use ASCII character encoding),
              * this technique of converting a character of an integer into an actual integer (ie, converting '7' to 7, etc)
-             * is, in fact, portable--at least as of C99. According to the C99 standard (§5.2.1, paragraph 3):
+             * is, in fact, portable in all versions of C since C89 (I haven't checked either edition of K&R C yet, so it might have started earlier).
+             * According to the C89 standard (§2.2.1 in ANSI X3.159-1989, §5.2.1 in ANSI/IS0 9899-1990):
              * "In both the source and execution basic character sets,
-             * the value of each character after 0 in the above list of decimal digits [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-             * shall be one greater than the value of the previous."
-             * That being said, I do not know if this is guaranteed by the C89 (C90) standard, which is still
-             * a very widely used version of C.
+             * the value of each character after 0 in the above list of decimal digits [0 1 2 3 4 5 6 7 8 9]
+             * shall be one greater than the value of the previous".
              * It's worth noting that the C standard does NOT guaranteed that the *alphabetical* characters
              * will be contiguous, only the digit characters (meaning "<char> - '0'" is portable, but "<char> - 'A'" isn't always).
              */
         if (!too_big)
-            *user_display_rows = atoi(y_dim_chars);
+        {
+            // Convert input:
+            int32_t typecast = 0;
+            for (i = 0; i < y_len; i++)
+                typecast += (y_dim_chars[(y_len - 1) - i] - '0') * (pow(10, i));
+            *user_display_rows = typecast;
+        }
     }
     too_big = false;
     if (x_len > max_len)
         *user_display_columns = INT32_MAX;
     else if (x_len < max_len)
-        *user_display_columns = atoi(x_dim_chars);
+    {
+        // Convert input:
+        int32_t typecast = 0;
+        for (i = 0; i < x_len; i++)
+            typecast += (x_dim_chars[(x_len - 1) - i] - '0') * (pow(10, i));
+        *user_display_columns = typecast;
+    }
     else // same length
     {
         for (i = 0; i < max_len; i++)
@@ -1349,7 +1385,13 @@ int display_strcmp(char *command, int32_t *user_display_rows, int32_t *user_disp
                 break;
             }
         if (!too_big)
-            *user_display_columns = atoi(x_dim_chars);
+        {
+            // Convert input:
+            int32_t typecast = 0;
+            for (i = 0; i < x_len; i++)
+                typecast += (x_dim_chars[(x_len - 1) - i] - '0') * (pow(10, i));
+            *user_display_columns = typecast;
+        }
     }
 
     free(y_dim_chars);
@@ -1364,7 +1406,176 @@ int handle_display_command(Gamestate *g, int32_t user_rows, int32_t user_columns
     if (user_rows == 0 || user_columns == 0)
         return 29;
 
+    // Shrink user_rows and user_columns to be within MAX_COORDINATE:
+    if (user_rows > MAX_COORDINATE)
+        user_rows = MAX_COORDINATE;
+    if (user_columns > MAX_COORDINATE)
+        user_columns = MAX_COORDINATE;
+
     g->user_settings->max_display_height = user_rows, g->user_settings->max_display_width = user_columns;
+    return -1;
+}
+
+int jump_strcmp(char *command, char **letter_coordinate, char **number_coordinate)
+{
+    int n = strlen(command);
+    if (n < MIN_JUMP_COMMAND_LENGTH)
+        return 0;
+    char *lower_command = malloc(sizeof(char) * n);
+    if (lower_command == NULL)
+    {
+        error_code = 21;
+        return 0;
+    }
+
+    for (int i = 0; i < n; i++)
+        *(lower_command + i) = tolower(command[i]);
+
+    if (strncmp("jump to ", lower_command, 8) != 0)
+        return 0;
+
+    free(lower_command);
+
+    bool letter_slot = true;
+    int letters = 0, numbers = 0;
+    for (int i = 8; i < n; i++)
+    {
+        if (letter_slot)
+        {
+            if (!isalpha(command[i]))
+            {
+                if (!letters)
+                    return 0;
+                else if (isdigit(command[i]))
+                {
+                    letter_slot = false;
+                    numbers++;
+                }
+                else
+                    return 0;
+            }
+            else
+                letters++;
+
+        }
+        else
+        {
+            if (!isdigit(command[i]))
+                return 0;
+            else
+                numbers++;
+        }
+    }
+    if (!numbers)
+        return 0;
+    
+    *letter_coordinate = malloc(sizeof(**letter_coordinate) * (letters + 1));
+    if (*letter_coordinate == NULL)
+    {
+        error_code = 22;
+        return 0;
+    }
+    *number_coordinate = malloc(sizeof(**number_coordinate) * (numbers + 1));
+    if (*number_coordinate == NULL)
+    {
+        free(*letter_coordinate);
+        error_code = 23;
+        return 0;
+    }
+
+    int i;
+    for (i = 8; i < 8 + letters; i++)
+        *(*letter_coordinate + (i - 8)) = toupper(command[i]);
+    *(*letter_coordinate + (i - 8)) = '\0';
+    for (i = 8 + letters; i < 8 + letters + numbers; i++)
+        *(*number_coordinate + (i - 8 - letters)) = command[i];
+    *(*number_coordinate + (i - 8 - letters)) = '\0';
+
+    // Ensure there are no leading zeroes:
+    if (strlen(*number_coordinate) > 1 && *number_coordinate[0] == '0')
+    {
+        free(*letter_coordinate);
+        free(*number_coordinate);
+        return 0;
+    }
+
+    return 1;
+}
+
+int handle_jump_command(Gamestate *g, char *letter_coordinate, char *number_coordinate)
+{
+    bool invalid_number_coordinate = false, invalid_letter_coordinate = false;
+    int32_t converted_number_coordinate = 0, converted_letter_coordinate = 0;
+
+    // Make sure number_coordinate can fit in an int32:
+    bool too_big = false;
+    int max_len = strlen(INT32_MAXIMUM_STRING);
+    int num_len = strlen(number_coordinate);
+    if (num_len > max_len)
+        invalid_number_coordinate = true;
+    else if (num_len < max_len)
+    {
+        // Convert input:
+        int32_t typecast = 0;
+        for (int i = 0; i < num_len; i++)
+            typecast += (number_coordinate[(num_len - 1) - i] - '0') * (pow(10, i));
+        converted_number_coordinate = typecast;
+    }
+    else // same length
+    {
+        for (int i = 0; i < max_len; i++)
+            if (number_coordinate[i] - '0' > INT32_MAXIMUM_STRING[i] - '0')
+            {
+                invalid_number_coordinate = true;
+                break;
+            }
+        if (!invalid_number_coordinate)
+        {
+            // Convert input:
+            int32_t typecast = 0;
+            for (int i = 0; i < num_len; i++)
+                typecast += (number_coordinate[(num_len - 1) - i] - '0') * (pow(10, i));
+            converted_number_coordinate = typecast;
+        }
+    }
+
+    max_len = strlen(MAX_LETTER_COORDINATE);
+    int x_len = strlen(letter_coordinate);
+    if (x_len > max_len)
+        invalid_letter_coordinate = true;
+    else
+        converted_letter_coordinate = convert_letters_to_numbers(letter_coordinate);
+
+    free(number_coordinate);
+    free(letter_coordinate);
+
+    // Check if coordinates are on map:
+    if (converted_number_coordinate > g->current_map->width - 1)
+        invalid_number_coordinate = true;
+    if (converted_letter_coordinate > g->current_map->height - 1)
+        invalid_letter_coordinate = true;
+
+    // Return codes for invalid coordinates:
+    if (invalid_letter_coordinate && invalid_number_coordinate)
+        return 30;
+    else if (invalid_letter_coordinate)
+        return 31;
+    else if (invalid_number_coordinate)
+        return 32;
+
+    // Assign cursor to new valid coordinates:
+    g->current_cursor_focus = g->display->layout[converted_letter_coordinate][converted_number_coordinate];
+
+    // Change display offsets to reach new cursor:
+    if (g->current_cursor_focus->y_coordinate < g->display->y_offset)
+        g->display->y_offset = g->current_cursor_focus->y_coordinate;
+    else if (g->current_cursor_focus->y_coordinate > g->display->y_offset + (g->display->height - 1))
+        g->display->y_offset = (g->display->height - 1) + g->current_cursor_focus->y_coordinate;
+    if (g->current_cursor_focus->x_coordinate < g->display->x_offset)
+        g->display->x_offset = g->current_cursor_focus->x_coordinate;
+    else if (g->current_cursor_focus->x_coordinate > g->display->x_offset + (g->display->width - 1))
+        g->display->x_offset = (g->display->width - 1) + g->current_cursor_focus->x_coordinate;
+
     return -1;
 }
 
@@ -1433,6 +1644,9 @@ void obey_command(int command_code, Gamestate *g)
         case 27: remove_row_south(g); break;
         case 28: remove_column_west(g); break;
         case 29: (void) printf("Display window must be at least 1x1.\n"), gobble_line(); break;
+        case 30: (void) printf("Unable to jump: the given y- and x- coordinates are off the map.\n"), gobble_line(); break;
+        case 31: (void) printf("Unable to jump: the given y-coordinate is off the map.\n"), gobble_line(); break;
+        case 32: (void) printf("Unable to jump: the given x-coordinate is off the map.\n"), gobble_line(); break;
     }
 }
 
@@ -1479,7 +1693,9 @@ void print_command_listing(Gamestate *g)
                         "\tDown (S): moves the cursor down one space\n"
                         "\tRight (D): moves the cursor right one space\n");
     }
-    (void) printf("\nCommands are not case-sensitive.\n");
+    (void) printf("\tJump to <letter_coordinate><number_coordinate>: Moves cursor to specified room\n"
+                    "\nCommands are not case-sensitive.\n"
+                    "Zero must be written as a single digit; numbers greater than zero must not include leading zeroes.\n");
     gobble_line();
     return;
 }

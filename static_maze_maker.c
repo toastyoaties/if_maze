@@ -122,8 +122,6 @@ enum movement_mode
 
 typedef struct room
 {
-    long long id;
-    char *id_alias;
     int32_t y_coordinate;
     int32_t x_coordinate;
     bool exists;
@@ -188,7 +186,7 @@ int error_code = 0;
 void gobble_line(void);
 Dimensions prompt_for_dimensions(void);
 Map *create_map(Dimensions dim);
-Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id);
+Room *make_room(int32_t y_coordinate, int32_t x_coordinate);
 Map *load_map(void);
 Gamestate *load_gamestate(void);
 Map *edit_map(Map *editable_map, Gamestate *current_gamestate);
@@ -392,12 +390,11 @@ Map *create_map(Dimensions dim)
 
     // Initialize linked list of rooms, starting from (0,0):
     created_map->root = NULL;
-    long long next_id = 0;
     for (int32_t y = 0; y < created_map->height; y++)
     {
         for (int32_t x = 0; x < created_map->width; x++)
         {
-            Room *r = make_room(y, x, next_id++);
+            Room *r = make_room(y, x);
             if (error_code) return created_map;
             if (created_map->root == NULL)
             {
@@ -421,12 +418,11 @@ Map *create_map(Dimensions dim)
  * make_room:    Purpose: Allocates memory for and initializes single room.                  *
  *               Parameters: int32_t y_coordinate -> the y-coordinate to assign to the room  *
  *                           int32_t x_coordinate -> the x-coordinate to assign to the room  *
- *                           long long room_id -> the id to be assigned to the room          *
  *               Return value: Room * -> a pointer to the new room                           *
  *               Side effects: - Allocates memory.                                           *
  *                             - Edits global variable "error_code".                         *
  *********************************************************************************************/
-Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
+Room *make_room(int32_t y_coordinate, int32_t x_coordinate)
 {
     Room *r = malloc(sizeof(Room));
     if (r == NULL)
@@ -436,13 +432,12 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate, long long room_id)
     }
 
     r->y_coordinate = y_coordinate, r->x_coordinate = x_coordinate;
-    r->exists = true, r->id = room_id, r->next_room = NULL;
+    r->exists = true, r->next_room = NULL;
     for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
     {
         r->exits[cardinal_direction] = 0;
     }
     r->mark = 0;
-    r->id_alias = NULL;
 
     return r;
 }
@@ -600,16 +595,13 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
     //      ...force destruction of matching exit (eg, removing a north exit forces removal of south exit from room above)
     // Allow commands for expanding grid by x rows or columns
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
-    //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
     // Allow commands for expanding grid by adding new individual rooms
     //      ...but ensure that this never expands past the MAX_COORDINATE limit.
-    //      ...if id for room reaches MAX_ID, renumber all the room ids to erase gaps and shrink the highest id.
     // Allow commands for deleting individual rooms
     //      ...but ensure the row/column count stays above zero
     // Allow commands for retracting grid by subtracting x rows or columns
     //      ...but ensure the row/column count stays above zero
     // Allow commands for establishing entrances and exits to maze (including interior ones)
-    // Allow commands for adding id aliases (ids are established programmatically)
     // Allow commands for scrolling view of grid cardinally (in this case, meaning up, down, left, right)
     // Let attempts at moving the cursor past the edges of the grid cause the grid to scroll (if there are rooms in that direction).
     // Allow commands for saving maze to file and reading maze from file
@@ -631,16 +623,16 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
 
 /**********************************************************************************************************
  * create_initial_layout:     Purpose: Allocates room for, and initializes,                               *
- *                                     a 2D array containing the ids of rooms to display                  *
+ *                                     a 2D array containing the addresses of rooms to display            *
  *                                     as visualized map during editing.                                  *
  *                            Parameters: Map *map_to_display -> the map data to create the array from.   *
- *                            Return value: Room *** -> a pointer to the array                        *
+ *                            Return value: Room *** -> a pointer to the array                            *
  *                            Side effects: - allocates memory                                            *
  *                                          - edits global variable "error_code"                          *
  **********************************************************************************************************/
 Room ***create_initial_layout(Map *map_to_display)
 {
-    //Create 2D grid to store room ids:
+    //Create 2D grid to store rooms:
     int32_t ncols = map_to_display->width;
     int32_t nrows = map_to_display->height;
 
@@ -1880,7 +1872,6 @@ void add_row_north(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row + 1][column]->exists = g->display->layout[row][column]->exists;
-            new_layout[row + 1][column]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row + 1][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -1942,7 +1933,6 @@ void add_column_east(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2004,7 +1994,6 @@ void add_row_south(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2066,7 +2055,6 @@ void add_column_west(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row][column + 1]->exists = g->display->layout[row][column]->exists;
-            new_layout[row][column + 1]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row][column + 1]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2545,7 +2533,6 @@ void remove_row_north(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row + 1][column]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row + 1][column]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row + 1][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2617,7 +2604,6 @@ void remove_column_east(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width - 1; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2689,7 +2675,6 @@ void remove_row_south(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row][column]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row][column]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row][column]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2761,7 +2746,6 @@ void remove_column_west(Gamestate *g)
         for (int32_t column = 0; column < g->current_map->width - 1; column++)
         {
             new_layout[row][column]->exists = g->display->layout[row][column + 1]->exists;
-            new_layout[row][column]->id_alias = g->display->layout[row][column + 1]->id_alias;
             new_layout[row][column]->mark = g->display->layout[row][column + 1]->mark;
             for (int cardinal_direction = NORTH; cardinal_direction < NUM_CARDINAL_DIRECTIONS; cardinal_direction++)
             {
@@ -2847,7 +2831,6 @@ void free_rooms(Room *r)
 // - Make height/width of editor a variable based on internal reading of terminal window size (including if user re-sizes terminal midway through execution).
 // - Add ability to turn off and back on the axis labels.
 // - Add ability to declare the edge of the map and make rooms connect to the beginning of a different map on the same level, to make it more feasable to build large spaces by dividing them into separate chunks each on their own map.
-// - Get rid of Room ids? Haven't seemed to use them thus far (2024-2-2). ID_alias would need to be renamed to just "label", or similar.
 // - Combine the four add row/column functions into one, to reduce duplicate code.
 // - Drastically reduce MAX_COORDINATE's size. No human would ever need a map that generous, and were one to be used, certain functions--like adding new rows/columns--would take a prohibitively long time (meaning DAYS of real time to create a duplicate map, for example).
 // - Add option to switch between nesw controls and wasd controls.

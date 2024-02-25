@@ -2,7 +2,8 @@
  * Current goal: Program save/load
     Afterwards: Program non-buffered input.
  *                                                                                                  *
-    Potential extras: Automated checking to see if maze is traversable; procedural map generation, demo map to play.
+    Potential extras: Automated checking to see if maze is traversable; procedural map generation; demo map to play;
+                        (OS-dependent:) code list all files in current directory during save/load.
  *                                                                                                  *
  *                                                                                                  *
  *                                                                                                  *
@@ -168,12 +169,14 @@ typedef struct settings
 typedef struct gamestate
 {
     bool quit;
+    bool saved;
     Display *display;
     Room *current_cursor_focus;
     Map *current_map;
     Settings *user_settings;
     Room *start;
     Room *end;
+    char *current_filename;
 } Gamestate;
 
 /* Declarations of External Variables */
@@ -187,8 +190,8 @@ void gobble_line(void);
 Dimensions prompt_for_dimensions(void);
 Map *create_map(Dimensions dim);
 Room *make_room(int32_t y_coordinate, int32_t x_coordinate);
-Map *load_map(void);
-Gamestate *load_gamestate(void);
+Map *load_map(long *fread_offset, char **file_to_load);
+Gamestate *load_gamestate(long *fread_offset, char **file_to_load);
 Map *edit_map(Map *editable_map, Gamestate *current_gamestate);
 Room ***create_initial_layout(Map *map_to_display);
 void free_layout(Room ***layout, int32_t height);
@@ -200,7 +203,7 @@ char *ystr(int32_t y_coordinate);
 int calculate_letter_digits(int32_t number_to_convert);
 int32_t lower_boundary(int base, int power);
 int calculate_letter_index(int32_t current_number, int current_digit, int32_t lower_boundary);
-int get_command(char *prompt, Gamestate *g);
+int get_command(char *prompt, Gamestate *g, char mode);
 void free_command(Command_C *root);
 int parse_command(char *command, Gamestate *g);
 int caseless_strcmp(char *str1, char *str2);
@@ -227,9 +230,11 @@ void remove_row_north(Gamestate *g);
 void remove_column_east(Gamestate *g);
 void remove_row_south(Gamestate *g);
 void remove_column_west(Gamestate *g);
-void save_map(Map *savable_map);
+void save_gamestate(Gamestate *savable_gamestate);
 void free_map(Map *freeable_map);
 void free_rooms(Room *r);
+void free_gamestate(Gamestate *g);
+bool warn(Gamestate *g);
 
 /* Definition of main */
 /*****************************************************************************************
@@ -243,6 +248,13 @@ void free_rooms(Room *r);
  *****************************************************************************************/
 int main(void)
 {
+    // Loading is done in two variably sized, unequal parts.
+    // This variable allows tracking of where first part ends so second part knows where to begin.
+    // (This was a consequence of the greenness of the programmer when originally structuring the program.)
+    long load_cursor = 0;
+    // This variable allows tracking of loaded filename until the gamestate is loaded (for the same reason).
+    char *file_to_load = NULL;
+
     // Main menu:
     // Option: Create new map to edit
     // Option: Load existing map to edit
@@ -275,7 +287,7 @@ int main(void)
         switch (selection)
         {
             case 1: free_map(edit_map(create_map(prompt_for_dimensions()), NULL)); break;
-            case 2: free_map(edit_map(load_map(), load_gamestate())); break;
+            case 2: free_map(edit_map(load_map(&load_cursor, &file_to_load), load_gamestate(&load_cursor, &file_to_load))); break;
             default: goto quit;
         }
         if (error_code) break;
@@ -309,6 +321,12 @@ int main(void)
         case 21: (void) printf("Encountered error. Error code 21: Unable to allocate memory for normalized version of user's jump command.\n"); break;
         case 22: (void) printf("Encountered error. Error code 22: Unable to allocate memory for letter coordinates from user's jump command.\n"); break;
         case 23: (void) printf("Encountered error. Error code 23: Unable to allocate memory for number coordinates from user's jump command.\n"); break;
+        case 24: (void) printf("Encountered unexpected error. Error code 24: Received unknown warning response code; cannot parse.\n"); break;
+        case 25: (void) printf("Encountered unexpected error. Error code 25: Received unknown mode switch for command processing; cannot parse.\n"); break;
+        case 26: (void) printf("Encountered error. Error code 26: Failed to properly close file after checking for presence of file with duplicate name.\n"); break;
+        case 27: (void) printf("Encountered error. Error code 27: Failed to properly write to savefile.\n"); break;
+        case 28: (void) printf("Encountered error. Error code 28: Failed to properly close savefile.\n"); break;
+        case 29: (void) printf("Encountered error. Error code 29: Failed both to properly write to savefile and to properly close savefile.\n"); break;
     }
     return error_code;
 }
@@ -451,20 +469,41 @@ Room *make_room(int32_t y_coordinate, int32_t x_coordinate)
  *                            - Reads from stdin.                                        *
  *                            - Allocates memory.                                        *
  *****************************************************************************************/
-Map *load_map(void)
+Map *load_map(long *fread_offset, char **file_to_load)
 {
     //TODO
     //  ...as part of the function, perform validation on the map file (for example, that it hasn't been edited so as to expand past MAX_COORDINATE, etc)
     // This function will need to run malloc for maps & rooms, or use the constructor subroutines and then re-assign properties from the loaded file to the malloc'd variables.
+
+    //According to the C standard (C90 §6.3.2.2, C99 §6.5.2.2), the order in which function arguments are evaluated is unspecified.
+    //Therefore, it can't be certain whether load_gamestate() or load_map() will run first,
+    //meaning the user might have already specified which file to load during load_gamestate().
+    if (*file_to_load == NULL)
+    {
+    }
+
     Map *loaded_map = NULL;
     return loaded_map;
 }
 
-Gamestate *load_gamestate(void)
+Gamestate *load_gamestate(long *fread_offset, char **file_to_load)
 {
     //TODO
     // as part of the function, perform validation on the gameplay file (if that makes sense when the time comes)
     // This function will need to run malloc for display & layout & gamestate, or use the constructor subroutines and then re-assign properties from the loaded file to the malloc'd variables.
+
+    //According to the C standard (C90 §6.3.2.2, C99 §6.5.2.2), the order in which function arguments are evaluated is unspecified.
+    //Therefore, it can't be certain whether load_gamestate() or load_map() will run first,
+    //meaning fread_offset might not have been altered appropriately yet.
+    if (*fread_offset == 0)
+    {
+    }
+    if (*file_to_load == NULL)
+    {
+    }
+
+    // ERASE ".ifmap" FROM END OF FILENAME BEFORE STORING IN LOADED_GAMESTATE->CURRENT_FILENAME!
+
     Gamestate *loaded_gamestate = NULL;
     return loaded_gamestate;
 }
@@ -476,7 +515,7 @@ Gamestate *load_gamestate(void)
  *                                     to be freed before further program operation         *
  *                                     or program termination.                              *
  *              Side effects: - Clears screen and scrollback                                *
- *                            - Calls save_map, which edits external files.                 *
+ *                            - Calls save_gamestate, which edits external files.                 *
  *                            - Prints to stdout.                                           *
  *                            - Reads from stdin.                                           *
  *                            - Modifies any and all data associated with passed map.       *
@@ -551,21 +590,24 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
             free(gamestate->display);
             free(gamestate->user_settings);
             editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
-            free(gamestate);
+            free_gamestate(gamestate);
             return editable_map;
         }
 
         #ifdef FORCE_BUFFERED_MODE
-            obey_command(get_command("Enter command:\n>", gamestate), gamestate);
+            obey_command(get_command("Enter command:\n>", gamestate, 'c'), gamestate);
             if (error_code)
             {
                 free_layout(gamestate->display->layout, gamestate->current_map->height);
                 free(gamestate->display);
                 free(gamestate->user_settings);
                 editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
-                free(gamestate);
+                free_gamestate(gamestate);
                 return editable_map;
             }
+            if (gamestate->quit && !gamestate->saved)
+                if (warn(gamestate))
+                    save_gamestate(gamestate);
         #endif
         #ifdef UNIX
             //TODO
@@ -617,7 +659,7 @@ Map *edit_map(Map *editable_map, Gamestate *current_gamestate)
     free(gamestate->display);
     free(gamestate->user_settings);
     editable_map = gamestate->current_map; // Re-establish map as its own variable so as to return and free it even once gamestate is already freed.
-    free(gamestate);
+    free_gamestate(gamestate);
     return editable_map;
 }
 
@@ -750,11 +792,13 @@ Gamestate *initialize_gamestate(Display *display, Map *current_map, Settings *de
     }
 
     g->quit = false;
+    g->saved = false;
     g->display = display;
     g->current_map = current_map;
     g->current_cursor_focus = display->layout[0][0];
     g->user_settings = defaults;
     g->start = g->end = NULL;
+    g->current_filename = NULL;
 
     return g;
 }
@@ -1085,7 +1129,7 @@ int calculate_letter_index(int32_t current_number, int current_digit, int32_t lo
  *                      Side effects (such as modifying external variables,              *
  *                          printing to stdout, or exiting the program): - Modifies global variable "error_code"                *
  *****************************************************************************************/
-int get_command(char *prompt, Gamestate *g)
+int get_command(char *prompt, Gamestate *g, char mode)
 {
     Command_C *root_c = NULL;
     int character = 0;
@@ -1134,10 +1178,23 @@ int get_command(char *prompt, Gamestate *g)
     command[character_count] = '\0';
     free_command(root_c);
 
-    int command_code = parse_command(command, g);
-    free(command);
-
-    return command_code;
+    if (mode == 'c')
+    {
+        int command_code = parse_command(command, g);
+        free(command);
+        return command_code;
+    }
+    else if (mode == 's')
+    {
+        g->current_filename = command;
+        return 0;
+    }
+    else
+    {
+        error_code = 25;
+        free(command);
+        return -1;
+    }
 }
 
 void free_command(Command_C *root)
@@ -1161,61 +1218,61 @@ int parse_command(char *command, Gamestate *g)
     else if (caseless_strcmp("quit", command) || caseless_strcmp("q", command))
         return 2;
     else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("north", command) || caseless_strcmp("n", command) : caseless_strcmp("up", command) || caseless_strcmp("w", command))
-        return 3;
+        return g->saved = false, 3;
     else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("east", command) || caseless_strcmp("e", command) : caseless_strcmp("right", command) || caseless_strcmp("d", command))
-        return 4;
+        return g->saved = false, 4;
     else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("south", command) || caseless_strcmp("s", command) : caseless_strcmp("down", command) || caseless_strcmp("s", command))
-        return 5;
+        return g->saved = false, 5;
     else if (g->user_settings->movement_mode == NESW ? caseless_strcmp("west", command) || caseless_strcmp("w", command) : caseless_strcmp("left", command) || caseless_strcmp("a", command))
-        return 6;
+        return g->saved = false, 6;
     else if (caseless_strcmp("toggle movement", command))
-        return 7;
+        return g->saved = false, 7;
     else if (caseless_strcmp("mark start", command))
-        return 8;
+        return g->saved = false, 8;
     else if (caseless_strcmp("mark end", command))
-        return 9;
+        return g->saved = false, 9;
     else if (caseless_strcmp("unmark", command))
-        return 10;
+        return g->saved = false, 10;
     else if (caseless_strcmp("delete", command))
-        return 11;
+        return g->saved = false, 11;
     else if (caseless_strcmp("undelete", command))
-        return 12;
+        return g->saved = false, 12;
     else if (caseless_strcmp("open up", command) || caseless_strcmp("open n", command) || caseless_strcmp("open north", command))
-        return 13;
+        return g->saved = false, 13;
     else if (caseless_strcmp("open right", command) || caseless_strcmp("open e", command) || caseless_strcmp("open east", command))
-        return 14;
+        return g->saved = false, 14;
     else if (caseless_strcmp("open down", command) || caseless_strcmp("open s", command) || caseless_strcmp("open south", command))
-        return 15;
+        return g->saved = false, 15;
     else if (caseless_strcmp("open left", command) || caseless_strcmp("open w", command) || caseless_strcmp("open west", command))
-        return 16;
+        return g->saved = false, 16;
     else if (caseless_strcmp("close up", command) || caseless_strcmp("close n", command) || caseless_strcmp("close north", command))
-        return 17;
+        return g->saved = false, 17;
     else if (caseless_strcmp("close right", command) || caseless_strcmp("close e", command) || caseless_strcmp("close east", command))
-        return 18;
+        return g->saved = false, 18;
     else if (caseless_strcmp("close down", command) || caseless_strcmp("close s", command) || caseless_strcmp("close south", command))
-        return 19;
+        return g->saved = false, 19;
     else if (caseless_strcmp("close left", command) || caseless_strcmp("close w", command) || caseless_strcmp("close west", command))
-        return 20;
+        return g->saved = false, 20;
     else if (caseless_strcmp("add row north", command) || caseless_strcmp("add row n", command) || caseless_strcmp("add n", command))
-        return 21;
+        return g->saved = false, 21;
     else if (caseless_strcmp("add column east", command) || caseless_strcmp("add column e", command) || caseless_strcmp("add e", command))
-        return 22;
+        return g->saved = false, 22;
     else if (caseless_strcmp("add row south", command) || caseless_strcmp("add row s", command) || caseless_strcmp("add s", command))
-        return 23;
+        return g->saved = false, 23;
     else if (caseless_strcmp("add column west", command) || caseless_strcmp("add column w", command) || caseless_strcmp("add w", command))
-        return 24;
+        return g->saved = false, 24;
     else if (caseless_strcmp("remove row north", command) || caseless_strcmp("remove row n", command) || caseless_strcmp("remove n", command) || caseless_strcmp("rem n", command))
-        return 25;
+        return g->saved = false, 25;
     else if (caseless_strcmp("remove column east", command) || caseless_strcmp("remove column e", command) || caseless_strcmp("remove e", command) || caseless_strcmp("rem e", command))
-        return 26;
+        return g->saved = false, 26;
     else if (caseless_strcmp("remove row south", command) || caseless_strcmp("remove row s", command) || caseless_strcmp("remove s", command) || caseless_strcmp("rem s", command))
-        return 27;
+        return g->saved = false, 27;
     else if (caseless_strcmp("remove column west", command) || caseless_strcmp("remove column w", command) || caseless_strcmp("remove w", command) || caseless_strcmp("rem w", command))
-        return 28;
+        return g->saved = false, 28;
     else if (display_strcmp(command, &user_display_rows, &user_display_columns))
-        return handle_display_command(g, user_display_rows, user_display_columns);
+        return g->saved = false, handle_display_command(g, user_display_rows, user_display_columns);
     else if (jump_strcmp(command, &letter_coordinate_holder, &number_coordinate_holder))
-        return handle_jump_command(g, letter_coordinate_holder, number_coordinate_holder);
+        return g->saved = false, handle_jump_command(g, letter_coordinate_holder, number_coordinate_holder);
     else
         return error_code ? -1 : 0;
 }
@@ -2778,19 +2835,215 @@ void remove_column_west(Gamestate *g)
 }
 
 /*******************************************************************************************
- * save_map:    Purpose: Saves the given map to an external file in a bespoke file format; *
+ * save_gamestate:    Purpose: Saves the given gamestate to an external file in a bespoke file format; *
  *                       can be instructed to create new file or overwrite old file.       *
- *              Parameters: Map *savable_map -> the map to be saved to file.               *
+ *              Parameters: Gamestate *savable_gamestate -> the gamestate to be saved to file.               *
  *              Return value: none                                                         *
  *              Side effects: - Creates or edits external files.                           *
  *                            - Prints to stdout                                           *
  *                            - Reads from stdin                                           *
  *******************************************************************************************/
-void save_map(Map *savable_map)
+void save_gamestate(Gamestate *savable_gamestate)
 {
     // TODO: Incorportate saving to new file and overriding old file.
     // TODO: Include ability to fetch list of files currently in system.
     // TODO: Similarly, or alternately, implement "Save" and "Save as..."
+
+    int return_code = 0, y_n = 0;
+    FILE *savefile = NULL;
+    bool valid = false;
+    int fclose_return = 0;
+
+    if (savable_gamestate->current_filename != NULL)
+    {
+        (void) printf("Save file as %s? (y/n)\n", savable_gamestate->current_filename);
+        do
+        {
+            y_n = tolower(getchar()); while (getchar() != '\n');
+        } while (y_n != 'y' && y_n != 'n');
+        if (y_n == 'n')
+        {
+            free(savable_gamestate->current_filename);
+            savable_gamestate->current_filename = NULL;
+        }
+    }
+    if (savable_gamestate->current_filename == NULL)
+    {
+        // Loop prompts for and stores valid filename to be used for the savefile:
+        do
+        {
+            return_code = get_command("Save under what filename?\n> ", savable_gamestate, 's');
+            if (return_code == -1)
+                return;
+            // Test whether a file with this name already exists:
+            savefile = fopen(strcat(savable_gamestate->current_filename, ".ifmap"), "r");
+            if (savefile == NULL)
+                valid = true;
+            else // If a file with this name already exists, confirm whether to save over it:
+            {
+                y_n = 0;
+                (void) printf("A file with this filename already exists. Overwrite file? (y/n)\n");
+                do
+                {
+                    y_n = tolower(getchar()); while (getchar() != '\n');
+                } while (y_n != 'y' && y_n != 'n');
+                if (y_n == 'y')
+                    valid = true;
+                fclose_return = fclose(savefile);
+            }
+        } while (!valid);
+    }
+
+    if (fclose_return == EOF)
+    {
+        error_code = 26;
+        return;
+    }
+
+    savefile = fopen(strcat(savable_gamestate->current_filename, ".ifmap"), "w");
+
+    int fwrite_return = 0;
+
+    // From here to end: Encode data and write.
+
+    // map height = int32_t
+    // map width = int32_t
+    // number of rooms (map height * map width) = int32_t
+    int32_t buffer32n1[3] = {0};
+    buffer32n1[0] = savable_gamestate->current_map->height;
+    buffer32n1[1] = savable_gamestate->current_map->width;
+    buffer32n1[2] = savable_gamestate->current_map->height * savable_gamestate->current_map->width; // Won't exceed int32 size due to MAX_COORDINATE.
+
+    for (int i = 0; i < 3; i++)
+    {
+        fwrite_return = fwrite(buffer32n1[i], sizeof(int32_t), 1, savefile);
+        if (fwrite_return != 1)
+        {
+            error_code = 27;
+            fclose_return = fclose(savefile);
+            if (fclose_return == EOF)
+                error_code = 29;
+            return;
+        }
+    }
+
+    // loop:
+    //      room y_coordinate = int32_t
+    //      room x_coordinate = int32_t
+    //      room exists = uint8_t
+    //      room exit north = uint8_t
+    //      room exit east = uint8_t
+    //      room exit south = uint8_t
+    //      room exit west = uint8_t
+    //      room mark (0 for nothing, 1 for start, 2 for end) = uint8_t
+
+    int32_t buffer32n2[2] = {0};
+    uint8_t buffer8n1[6] = {0};
+    Room *current_room = savable_gamestate->current_map->root;
+
+    while (current_room != NULL)
+    {
+        buffer32n2[0] = current_room->y_coordinate;
+        buffer32n2[1] = current_room->x_coordinate;
+
+        buffer8n1[0] = current_room->exists ? 1 : 0;
+        buffer8n1[1] = current_room->exits[NORTH] ? 1 : 0;
+        buffer8n1[2] = current_room->exits[EAST] ? 1 : 0;
+        buffer8n1[3] = current_room->exits[SOUTH] ? 1 : 0;
+        buffer8n1[4] = current_room->exits[WEST] ? 1 : 0;
+        buffer8n1[5] = current_room->mark == 0 ? 0 : current_room->mark == 'S' ? 1 : 2;
+    
+        for (int i = 0; i < 2; i++)
+        {
+            fwrite_return = fwrite(buffer32n2[i], sizeof(int32_t), 1, savefile);
+            if (fwrite_return != 1)
+            {
+                error_code = 27;
+                fclose_return = fclose(savefile);
+                if (fclose_return == EOF)
+                    error_code = 29;
+                return;
+            }
+        }
+        for (int i = 0; i < 6; i++)
+        {
+            fwrite_return = fwrite(buffer8n1[i], sizeof(uint8_t), 1, savefile);
+            if (fwrite_return != 1)
+            {
+                error_code = 27;
+                fclose_return = fclose(savefile);
+                if (fclose_return == EOF)
+                    error_code = 29;
+                return;
+            }
+        }
+
+        current_room = current_room->next_room;
+    }
+
+    // display height = int32_t
+    // display width = int32_t
+    // display y_offset = int32_t
+    // display x_offset = int32_t
+    int32_t buffer32n3[4] = {0};
+    buffer32n3[0] = savable_gamestate->display->height;
+    buffer32n3[1] = savable_gamestate->display->width;
+    buffer32n3[2] = savable_gamestate->display->y_offset;
+    buffer32n3[3] = savable_gamestate->display->x_offset;
+
+    for (int i = 0; i < 4; i++)
+    {
+        fwrite_return = fwrite(buffer32n3[i], sizeof(int32_t), 1, savefile);
+        if (fwrite_return != 1)
+        {
+            error_code = 27;
+            fclose_return = fclose(savefile);
+            if (fclose_return == EOF)
+                error_code = 29;
+            return;
+        }
+    }
+
+    // settings movement mode = uint8_t
+    uint8_t buffer8n2 = 0;
+    buffer8n2 = savable_gamestate->user_settings->movement_mode == NESW ? 0 : 1;
+
+    fwrite_return = fwrite(buffer8n2, sizeof(uint8_t), 1, savefile);
+    if (fwrite_return != 1)
+    {
+        error_code = 27;
+        fclose_return = fclose(savefile);
+        if (fclose_return == EOF)
+            error_code = 29;
+        return;
+    }
+
+    // settings max display height = int32_t
+    // settings max display width = int32_t
+    // gamestate current_cursor_focus y_coordinate = int32_t
+    // gamestate current_cursor_focus x_coordinate = int32_t
+    int32_t buffer32n4[4] = {0};
+    buffer32n4[0] = savable_gamestate->user_settings->max_display_height;
+    buffer32n4[1] = savable_gamestate->user_settings->max_display_width;
+    buffer32n4[2] = savable_gamestate->current_cursor_focus->y_coordinate;
+    buffer32n4[3] = savable_gamestate->current_cursor_focus->x_coordinate;
+
+    for (int i = 0; i < 4; i++)
+    {
+        fwrite_return = fwrite(buffer32n4[i], sizeof(int32_t), 1, savefile);
+        if (fwrite_return != 1)
+        {
+            error_code = 27;
+            fclose_return = fclose(savefile);
+            if (fclose_return == EOF)
+                error_code = 29;
+            return;
+        }
+    }
+
+    fclose_return = fclose(savefile);
+    if (fclose_return == EOF)
+        error_code = 28;
     return;
 }
 
@@ -2826,6 +3079,52 @@ void free_rooms(Room *r)
     return;
 }
 
+void free_gamestate(Gamestate *g)
+{
+    free(g->current_filename);
+    free(g);
+
+    return;
+}
+
+bool warn(Gamestate *g)
+{
+    for (;;)
+    {
+        // Display main menu:
+        CLEAR_CONSOLE;
+        (void) printf("WARNING! You have unsaved changes remaining. Are you sure you'd like to quit?\n");
+        (void) printf("\nOptions:\n");
+        (void) printf("1. Save and quit\n");
+        (void) printf("2. Quit without saving\n");
+        (void) printf("3. Save and continue\n");
+        (void) printf("4. Continue without saving\n\n");
+
+        // Prompt for and validate user input:
+        int selection = 0;
+        for (;;)
+        {
+            (void) printf("Enter option number:\n>");
+            (void) scanf("%d", &selection), gobble_line();
+
+            if (selection < 1 || selection > 4)
+                (void) printf("Please pick from the available options.\n");
+            else
+                break;
+        }
+
+        // Parse user input and exit function:
+        switch (selection)
+        {
+            case 1: return true;
+            case 2: return false;
+            case 3: return g->quit = false, true;
+            case 4: return g->quit = false, false;
+            default: return error_code = 24, false;
+        }
+    }
+}
+
 //FUTURE TODOS:
 // - Make height/width of editor adjustable for different sized monitors. Maybe implement a settings menu with defaults?
 // - Make height/width of editor a variable based on internal reading of terminal window size (including if user re-sizes terminal midway through execution).
@@ -2833,4 +3132,3 @@ void free_rooms(Room *r)
 // - Add ability to declare the edge of the map and make rooms connect to the beginning of a different map on the same level, to make it more feasable to build large spaces by dividing them into separate chunks each on their own map.
 // - Combine the four add row/column functions into one, to reduce duplicate code.
 // - Drastically reduce MAX_COORDINATE's size. No human would ever need a map that generous, and were one to be used, certain functions--like adding new rows/columns--would take a prohibitively long time (meaning DAYS of real time to create a duplicate map, for example).
-// - Add option to switch between nesw controls and wasd controls.
